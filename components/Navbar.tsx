@@ -1,7 +1,7 @@
 export default function Navbar() {
   return (
-    <nav style={{ padding: "1rem", borderBottom: "1px solid #ddd" }}>
-      <h1>DevVelocity</h1>
+    <nav className="w-full p-4 bg-gray-900 text-white text-center">
+      <h2 className="text-xl font-semibold">DevVelocity</h2>
     </nav>
   );
 }
