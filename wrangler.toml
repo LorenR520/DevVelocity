@@ -2,16 +2,14 @@ name = "devvelocity"
 compatibility_date = "2023-10-01"
 pages_build_output_dir = ".vercel/output/static"
 
-# Required for Next.js on Cloudflare Pages
+# REQUIRED FOR NEXT.JS ON PAGES
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
 NODE_ENV = "production"
 
-# Correct observability block
 [observability]
 logs = { enabled = true }
 
-# Optional: keep logpush off for stability
 [logpush]
 enabled = false
