@@ -1,61 +1,16 @@
-name = "devvelocity"
+name = "develocity"
 compatibility_date = "2024-11-20"
-compatibility_flags = ["nodejs_compat"]
 
-# OUTPUT DIRECTORY MUST MATCH NEXT.JS BUILD
-pages_build_output_dir = ".next"
+[observability]
+enabled = true
 
 [build]
 command = "npm run build"
 
-[functions]
-directory = "./functions"
-node_compat = true
-
 [vars]
-APP_NAME = "DevVelocity"
-ENVIRONMENT = "production"
-SECRET_KEY = "REPLACE_ME"
-LICENSE_SALT = "REPLACE_ME"
+# Example env vars
+NODE_VERSION = "18"
+NEXT_PRIVATE_STANDALONE = "true"
 
-[env.production.vars]
-APP_NAME = "DevVelocity"
-ENVIRONMENT = "production"
-
-[env.preview.vars]
-APP_NAME = "DevVelocity"
-ENVIRONMENT = "preview"
-
-[[kv_namespaces]]
-binding = "DEVVELOCITY_KV"
-id = "devvelocity-kv"
-preview_id = "devvelocity-kv-preview"
-
-[[r2_buckets]]
-binding = "DEVVELOCITY_ASSETS"
-bucket_name = "devvelocity-assets"
-
-[[d1_databases]]
-binding = "DEVVELOCITY_DB"
-database_name = "devvelocity-db"
-database_id = "devvelocity-db-id"
-
-[[durable_objects.bindings]]
-name = "LICENSE_MANAGER"
-class_name = "LicenseManager"
-
-[[queues.producers]]
-binding = "DEVVELOCITY_QUEUE"
-queue = "devvelocity-job-queue"
-
-[[analytics_engine_datasets]]
-binding = "DEVVELOCITY_ANALYTICS"
-dataset = "devvelocity-analytics"
-
-[ai]
-binding = "DEVVELOCITY_AI"
-
-[observability]
-enabled = true
-logs = true
-metrics = true
+[pages]
+pages_build_output_dir = ".vercel/output/static"
