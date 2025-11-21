@@ -6,10 +6,6 @@ pages_build_output_dir = ".vercel/output/static"
 [vars]
 NODE_ENV = "production"
 
-# Observability logs (correct structure)
+# Observability logs
 [observability]
 logs = { enabled = true }
-
-# Optional: Logpush (Cloudflare Analytics)
-[logpush]
-enabled = false
