@@ -1,6 +1,5 @@
-name = "devvelocity"
-compatibility_date = "2024-09-01"
+name = "develocity"
+compatibility_date = "2023-12-01"
 
-[site]
-bucket = ".next"
-entry-point = "workers-site"
+# Cloudflare Pages uses this directory after build
+pages_build_output_dir = ".next"
