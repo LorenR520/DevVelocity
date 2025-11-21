@@ -1,7 +1,9 @@
 export default function Footer() {
   return (
-    <footer style={{ padding: "1rem", borderTop: "1px solid #ddd" }}>
-      <p>© 2025 DevVelocity</p>
+    <footer className="w-full p-4 bg-gray-900 text-white text-center mt-10">
+      <p className="text-sm opacity-70">
+        © {new Date().getFullYear()} DevVelocity — All Rights Reserved.
+      </p>
     </footer>
   );
 }
