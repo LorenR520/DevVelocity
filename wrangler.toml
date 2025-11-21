@@ -1,15 +1,14 @@
 name = "develocity"
-compatibility_date = "2024-11-20"
+compatibility_date = "2023-10-01"
+pages_build_output_dir = ".vercel/output/static"
+
+# Optional advanced settings
+[vars]
+NODE_ENV = "production"
 
 [observability]
-enabled = true
+enabled = true  # < Must use "enabled", not "logs"
 
-[build]
-command = "npm run build"
-
-[vars]
-NODE_VERSION = "18"
-NEXT_PRIVATE_STANDALONE = "true"
-
-[pages]
-pages_build_output_dir = ".vercel/output/static"
+# Optional: enable logging retention
+[logpush]
+enabled = false
