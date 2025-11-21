@@ -2,13 +2,14 @@ name = "develocity"
 compatibility_date = "2023-10-01"
 pages_build_output_dir = ".vercel/output/static"
 
-# Optional advanced settings
+# Environment variables
 [vars]
 NODE_ENV = "production"
 
+# Enable observability logs (correct structure)
 [observability]
-enabled = true  # < Must use "enabled", not "logs"
+logs = { enabled = true }
 
-# Optional: enable logging retention
+# Optional logpush retention settings
 [logpush]
 enabled = false
