@@ -2,7 +2,7 @@ name = "devvelocity"
 compatibility_date = "2023-10-01"
 pages_build_output_dir = ".vercel/output/static"
 
-# REQUIRED FOR NEXT.JS ON PAGES
+# REQUIRED FOR NEXT.JS ON CLOUDFLARE PAGES
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -10,6 +10,3 @@ NODE_ENV = "production"
 
 [observability]
 logs = { enabled = true }
-
-[logpush]
-enabled = false
