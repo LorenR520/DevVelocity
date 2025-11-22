@@ -2,7 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light Mode Background */
+html {
+  background-color: #F9FAFB;
+}
+
+/* Dark Mode Background */
+html.dark {
+  background-color: #111827;
+  color-scheme: dark;
+}
+
 body {
-  margin: 0;
-  padding: 0;
+  @apply text-neutral-900 dark:text-neutral-100;
+  font-family: Inter, sans-serif;
+}
+
+/* Enterprise links */
+a {
+  @apply text-brand-dark dark:text-brand-light hover:underline;
+}
+
+/* Headings */
+h1, h2, h3, h4 {
+  @apply font-semibold tracking-tight;
+}
+
+/* Panels */
+.panel {
+  @apply rounded-lg p-6 bg-white dark:bg-darkmode-panel border border-neutral-200 dark:border-darkmode-border;
 }
