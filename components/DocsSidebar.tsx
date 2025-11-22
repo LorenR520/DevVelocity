@@ -2,67 +2,114 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const links = [
-  { label: "Installation", href: "/docs/installation" },
-  { label: "Pricing", href: "/docs/pricing" },
-  {
-    label: "Providers",
-    children: [
-      { label: "AWS", href: "/docs/providers/aws" },
-      { label: "Azure", href: "/docs/providers/azure" },
-      { label: "DigitalOcean", href: "/docs/providers/digitalocean" },
-      { label: "GCP", href: "/docs/providers/gcp" },
-      { label: "Linode", href: "/docs/providers/linode" },
-      { label: "OCI", href: "/docs/providers/oci" },
-      { label: "Vultr", href: "/docs/providers/vultr" },
-    ],
-  },
-  { label: "Support", href: "/support" },
-];
+import { useState } from "react";
 
 export default function DocsSidebar() {
   const pathname = usePathname();
 
+  const isActive = (path: string) =>
+    pathname === path
+      ? "text-indigo-600 font-semibold"
+      : "text-gray-700 hover:text-indigo-600";
+
+  const [providersOpen, setProvidersOpen] = useState(true);
+
   return (
-    <nav className="p-6 space-y-4">
-      {links.map((item, i) => (
-        <div key={i}>
-          {!item.children ? (
-            <Link
-              href={item.href!}
-              className={`block py-2 text-sm ${
-                pathname === item.href
-                  ? "text-blue-400 font-semibold"
-                  : "text-white/70 hover:text-white"
-              }`}
-            >
-              {item.label}
+    <nav className="space-y-6 text-sm">
+
+      {/* =============== SECTION: Getting Started =============== */}
+      <div>
+        <h4 className="uppercase text-gray-500 text-xs font-bold mb-2">
+          Getting Started
+        </h4>
+
+        <ul className="space-y-2">
+          <li>
+            <Link href="/docs/installation" className={isActive("/docs/installation")}>
+              Installation
             </Link>
-          ) : (
-            <div>
-              <div className="text-xs uppercase text-white/40 mb-2">
-                {item.label}
-              </div>
-              <div className="pl-4 space-y-1">
-                {item.children.map((c, j) => (
-                  <Link
-                    key={j}
-                    href={c.href}
-                    className={`block py-1 text-sm ${
-                      pathname === c.href
-                        ? "text-blue-400 font-semibold"
-                        : "text-white/60 hover:text-white"
-                    }`}
-                  >
-                    {c.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
+          </li>
+
+          <li>
+            <Link href="/docs/pricing" className={isActive("/docs/pricing")}>
+              Pricing
+            </Link>
+          </li>
+        </ul>
+      </div>
+
+
+      {/* =============== SECTION: Cloud Providers =============== */}
+      <div>
+        <button
+          onClick={() => setProvidersOpen(!providersOpen)}
+          className="flex justify-between w-full text-left uppercase text-gray-500 text-xs font-bold mb-2"
+        >
+          Cloud Providers
+          <span>{providersOpen ? "▾" : "▸"}</span>
+        </button>
+
+        {providersOpen && (
+          <ul className="space-y-2 ml-2">
+            <li>
+              <Link href="/docs/providers/aws" className={isActive("/docs/providers/aws")}>
+                AWS
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/azure" className={isActive("/docs/providers/azure")}>
+                Azure
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/gcp" className={isActive("/docs/providers/gcp")}>
+                Google Cloud (GCP)
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/oci" className={isActive("/docs/providers/oci")}>
+                Oracle Cloud (OCI)
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/digitalocean" className={isActive("/docs/providers/digitalocean")}>
+                DigitalOcean
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/linode" className={isActive("/docs/providers/linode")}>
+                Linode
+              </Link>
+            </li>
+            <li>
+              <Link href="/docs/providers/vultr" className={isActive("/docs/providers/vultr")}>
+                Vultr
+              </Link>
+            </li>
+          </ul>
+        )}
+      </div>
+
+
+      {/* =============== SECTION: Support =============== */}
+      <div>
+        <h4 className="uppercase text-gray-500 text-xs font-bold mb-2">
+          Support
+        </h4>
+
+        <ul className="space-y-2">
+          <li>
+            <Link href="/docs/support" className={isActive("/docs/support")}>
+              Support Overview
+            </Link>
+          </li>
+          <li>
+            <Link href="/docs/support/getting-started" className={isActive("/docs/support/getting-started")}>
+              Getting Help
+            </Link>
+          </li>
+        </ul>
+      </div>
     </nav>
   );
 }
