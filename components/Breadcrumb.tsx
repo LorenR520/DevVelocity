@@ -1,23 +1,26 @@
-// components/Breadcrumb.tsx
+"use client";
 
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 
-export default function Breadcrumb({ items }) {
-  return (
-    <nav className="text-xs text-gray-500 mb-4">
-      {items.map((item, i) => (
-        <span key={i}>
-          {item.href ? (
-            <Link href={item.href} className="hover:text-green-700">
-              {item.label}
-            </Link>
-          ) : (
-            <span>{item.label}</span>
-          )}
+export default function Breadcrumb() {
+  const path = usePathname().split("/").filter(Boolean);
 
-          {i < items.length - 1 && " / "}
-        </span>
-      ))}
-    </nav>
+  return (
+    <div className="text-sm text-white/50 mb-6 flex space-x-2">
+      <Link href="/">Home</Link>
+      {path.map((segment, index) => {
+        const href = "/" + path.slice(0, index + 1).join("/");
+
+        return (
+          <div className="flex items-center space-x-2" key={index}>
+            <span>/</span>
+            <Link className="capitalize text-white" href={href}>
+              {segment.replace("-", " ")}
+            </Link>
+          </div>
+        );
+      })}
+    </div>
   );
 }
