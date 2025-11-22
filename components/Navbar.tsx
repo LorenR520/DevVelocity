@@ -4,6 +4,7 @@ import Link from "next/link";
 import MobileSidebar from "./MobileSidebar";
 import { useState, useEffect } from "react";
 import { IoMoon, IoSunny } from "react-icons/io5";
+import SearchBar from "./SearchBar";
 
 export default function Navbar() {
   const [dark, setDark] = useState(false);
@@ -43,7 +44,8 @@ export default function Navbar() {
         </div>
 
         {/* RIGHT */}
-        <div className="flex items-center gap-4">
+        <div className="hidden md:flex items-center gap-4">
+  <SearchBar />
           <button
             onClick={toggleTheme}
             className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
