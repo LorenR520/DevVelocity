@@ -2,33 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light Mode Background */
-html {
-  background-color: #F9FAFB;
-}
-
-/* Dark Mode Background */
-html.dark {
-  background-color: #111827;
-  color-scheme: dark;
+/* GLOBAL THEME */
+:root {
+  --hunter: #0b3d2e;
+  --jade: #2ecc71;
 }
 
 body {
-  @apply text-neutral-900 dark:text-neutral-100;
-  font-family: Inter, sans-serif;
+  background: #f8fafc;
+  color: #1f2937;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Enterprise links */
+/* LINKS */
 a {
-  @apply text-brand-dark dark:text-brand-light hover:underline;
+  transition: color 0.15s ease;
 }
 
-/* Headings */
+/* HEADERS */
 h1, h2, h3, h4 {
-  @apply font-semibold tracking-tight;
+  font-weight: 600;
+  color: var(--hunter);
 }
 
-/* Panels */
-.panel {
-  @apply rounded-lg p-6 bg-white dark:bg-darkmode-panel border border-neutral-200 dark:border-darkmode-border;
+/* BUTTONS */
+.btn-primary {
+  background: var(--hunter);
+  color: white;
+  padding: 0.6rem 1.1rem;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.btn-outline {
+  border: 2px solid var(--hunter);
+  padding: 0.6rem 1.1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--hunter);
+}
+
+/* ENTERPRISE CARD */
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }
