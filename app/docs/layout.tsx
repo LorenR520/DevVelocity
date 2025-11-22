@@ -1,21 +1,19 @@
-// app/docs/layout.tsx
+import DocsSidebar from "@/components/DocsSidebar";
+import Breadcrumb from "@/components/Breadcrumb";
 
-import DocsSidebar from "../../components/DocsSidebar";
-import "../../globals.css";
-
-export default function DocsLayout({ children }) {
+export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col md:flex-row max-w-7xl mx-auto w-full">
-      
-      {/* SIDEBAR */}
-      <aside className="w-full md:w-64 border-r border-gray-200 bg-white">
+    <div className="flex min-h-screen bg-[#0d0d13] text-white">
+      <aside className="w-64 hidden md:block border-r border-white/10 bg-[#111118]">
         <DocsSidebar />
       </aside>
 
-      {/* MAIN CONTENT */}
-      <div className="flex-1 p-6">
-        {children}
-      </div>
+      <main className="flex-1 p-8">
+        <Breadcrumb />
+        <div className="mt-6 max-w-4xl mx-auto prose prose-invert">
+          {children}
+        </div>
+      </main>
     </div>
   );
 }
