@@ -1,64 +1,68 @@
-// components/DocsSidebar.tsx
-
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function DocsSidebar() {
-  const path = usePathname();
+const links = [
+  { label: "Installation", href: "/docs/installation" },
+  { label: "Pricing", href: "/docs/pricing" },
+  {
+    label: "Providers",
+    children: [
+      { label: "AWS", href: "/docs/providers/aws" },
+      { label: "Azure", href: "/docs/providers/azure" },
+      { label: "DigitalOcean", href: "/docs/providers/digitalocean" },
+      { label: "GCP", href: "/docs/providers/gcp" },
+      { label: "Linode", href: "/docs/providers/linode" },
+      { label: "OCI", href: "/docs/providers/oci" },
+      { label: "Vultr", href: "/docs/providers/vultr" },
+    ],
+  },
+  { label: "Support", href: "/support" },
+];
 
-  const sections = [
-    {
-      title: "Getting Started",
-      items: [
-        { label: "Installation", href: "/docs/installation" },
-      ],
-    },
-    {
-      title: "Cloud Providers",
-      items: [
-        { label: "AWS", href: "/docs/providers/aws" },
-        { label: "Azure", href: "/docs/providers/azure" },
-        { label: "Google Cloud", href: "/docs/providers/gcp" },
-        { label: "Oracle Cloud (OCI)", href: "/docs/providers/oci" },
-        { label: "DigitalOcean", href: "/docs/providers/digitalocean" },
-        { label: "Linode", href: "/docs/providers/linode" },
-        { label: "Vultr", href: "/docs/providers/vultr" },
-      ],
-    },
-  ];
+export default function DocsSidebar() {
+  const pathname = usePathname();
 
   return (
-    <div className="p-6 text-sm">
-      {sections.map((section, i) => (
-        <div key={i} className="mb-8">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-            {section.title}
-          </h3>
-
-          <ul className="space-y-2">
-            {section.items.map((item, j) => {
-              const active = path === item.href;
-
-              return (
-                <li key={j}>
+    <nav className="p-6 space-y-4">
+      {links.map((item, i) => (
+        <div key={i}>
+          {!item.children ? (
+            <Link
+              href={item.href!}
+              className={`block py-2 text-sm ${
+                pathname === item.href
+                  ? "text-blue-400 font-semibold"
+                  : "text-white/70 hover:text-white"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ) : (
+            <div>
+              <div className="text-xs uppercase text-white/40 mb-2">
+                {item.label}
+              </div>
+              <div className="pl-4 space-y-1">
+                {item.children.map((c, j) => (
                   <Link
-                    href={item.href}
-                    className={`block px-3 py-2 rounded-md ${
-                      active
-                        ? "bg-green-50 text-green-800 font-medium"
-                        : "text-gray-700 hover:bg-gray-100 hover:text-green-800"
+                    key={j}
+                    href={c.href}
+                    className={`block py-1 text-sm ${
+                      pathname === c.href
+                        ? "text-blue-400 font-semibold"
+                        : "text-white/60 hover:text-white"
                     }`}
                   >
-                    {item.label}
+                    {c.label}
                   </Link>
-                </li>
-              );
-            })}
-          </ul>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ))}
-    </div>
+    </nav>
   );
 }
