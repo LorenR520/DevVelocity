@@ -1,33 +1,25 @@
-// components/Navbar.tsx
 "use client";
 
 import Link from "next/link";
+import MobileSidebar from "./MobileSidebar";
 
 export default function Navbar() {
   return (
-    <header className="w-full border-b border-gray-200 bg-white shadow-sm">
-      <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+    <header className="w-full border-b border-gray-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50 backdrop-blur-md sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
         
-        {/* LEFT — LOGO */}
-        <Link href="/" className="text-xl font-semibold text-green-800">
-          DevVelocity
-        </Link>
+        {/* LEFT — MOBILE SIDEBAR ICON */}
+        <div className="flex items-center gap-3">
+          <MobileSidebar />
+          <Link href="/" className="text-xl font-semibold">
+            DevVelocity
+          </Link>
+        </div>
 
-        {/* RIGHT — NAVIGATION */}
-        <nav className="flex space-x-8 text-sm font-medium text-gray-700">
-          <Link href="/docs/installation" className="hover:text-green-700">
-            Docs
-          </Link>
-          <Link href="/pricing" className="hover:text-green-700">
-            Pricing
-          </Link>
-          <Link href="/support" className="hover:text-green-700">
-            Support
-          </Link>
-          <Link href="/login" className="hover:text-green-700">
-            Login
-          </Link>
-        </nav>
+        {/* RIGHT — FUTURE: Search / Dark mode / Profile */}
+        <div className="flex items-center gap-4">
+          {/* placeholder */}
+        </div>
       </div>
     </header>
   );
