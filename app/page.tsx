@@ -1,47 +1,32 @@
 export default function Home() {
   return (
-    <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center px-6">
-      <h1 className="text-5xl font-bold mb-4 text-[#7CFF6B]">DevVelocity</h1>
+    <div className="p-8 text-center">
+      <h1 className="text-4xl font-bold mb-4 text-green-400">
+        DevVelocity
+      </h1>
 
-      <p className="text-lg opacity-80 mb-12">
+      <p className="text-lg opacity-80 mb-10">
         Automated Multi-Cloud Image Marketplace
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-6 text-center">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
 
-        <a href="/docs/providers/aws" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          AWS
+        <a href="/docs/introduction" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
+          <h2 className="text-xl font-semibold mb-2 text-green-300">📘 Documentation</h2>
+          <p className="opacity-80">Learn how DevVelocity works & how to deploy images.</p>
         </a>
 
-        <a href="/docs/providers/azure" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          Azure
+        <a href="/docs/providers" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
+          <h2 className="text-xl font-semibold mb-2 text-green-300">☁️ Providers</h2>
+          <p className="opacity-80">AWS, Azure, GCP, OCI, Linode, DigitalOcean, Vultr</p>
         </a>
 
-        <a href="/docs/providers/gcp" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          Google Cloud
-        </a>
-
-        <a href="/docs/providers/oci" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          Oracle Cloud (OCI)
-        </a>
-
-        <a href="/docs/providers/digitalocean" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          DigitalOcean
-        </a>
-
-        <a href="/docs/providers/linode" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          Linode
-        </a>
-
-        <a href="/docs/providers/vultr" className="p-4 border border-[#7CFF6B] rounded-lg hover:bg-[#7CFF6B] hover:text-black transition">
-          Vultr
+        <a href="/docs/pricing" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
+          <h2 className="text-xl font-semibold mb-2 text-green-300">💵 Pricing</h2>
+          <p className="opacity-80">Simple transparent pricing for all image tiers.</p>
         </a>
 
       </div>
-
-      <footer className="mt-20 opacity-60 text-sm">
-        © 2025 DevVelocity — All Rights Reserved.
-      </footer>
-    </main>
+    </div>
   );
 }
