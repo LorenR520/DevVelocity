@@ -1,32 +1,62 @@
+// app/page.tsx
 export default function Home() {
   return (
-    <div className="p-8 text-center">
-      <h1 className="text-4xl font-bold mb-4 text-green-400">
-        DevVelocity
-      </h1>
+    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900 text-white">
+      {/* HERO SECTION */}
+      <section className="max-w-6xl mx-auto px-6 pt-32 pb-24 text-center">
+        <h1 className="text-5xl md:text-7xl font-bold drop-shadow-xl">
+          DevVelocity
+        </h1>
+        <p className="mt-6 text-xl md:text-2xl text-gray-300">
+          Automated Multi-Cloud Image Marketplace for Enterprise Infrastructure
+        </p>
 
-      <p className="text-lg opacity-80 mb-10">
-        Automated Multi-Cloud Image Marketplace
-      </p>
+        <div className="mt-10 flex justify-center gap-4">
+          <a
+            href="/docs/installation"
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-lg font-medium"
+          >
+            Get Started
+          </a>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          <a
+            href="/pricing"
+            className="px-6 py-3 border border-gray-500 hover:bg-gray-800 rounded-lg text-lg font-medium"
+          >
+            View Pricing
+          </a>
+        </div>
+      </section>
 
-        <a href="/docs/introduction" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
-          <h2 className="text-xl font-semibold mb-2 text-green-300">📘 Documentation</h2>
-          <p className="opacity-80">Learn how DevVelocity works & how to deploy images.</p>
-        </a>
+      {/* FEATURES SECTION */}
+      <section className="max-w-6xl mx-auto px-6 pb-32">
+        <h2 className="text-3xl font-semibold mb-10 text-center">
+          Why DevVelocity?
+        </h2>
 
-        <a href="/docs/providers" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
-          <h2 className="text-xl font-semibold mb-2 text-green-300">☁️ Providers</h2>
-          <p className="opacity-80">AWS, Azure, GCP, OCI, Linode, DigitalOcean, Vultr</p>
-        </a>
+        <div className="grid md:grid-cols-3 gap-8">
+          <div className="p-6 bg-gray-800/60 rounded-xl border border-gray-700">
+            <h3 className="text-xl font-semibold">Multi-Cloud Support</h3>
+            <p className="mt-2 text-gray-300">
+              Deploy images across AWS, Azure, GCP, OCI, Linode, Vultr, and DigitalOcean.
+            </p>
+          </div>
 
-        <a href="/docs/pricing" className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-green-400 transition">
-          <h2 className="text-xl font-semibold mb-2 text-green-300">💵 Pricing</h2>
-          <p className="opacity-80">Simple transparent pricing for all image tiers.</p>
-        </a>
+          <div className="p-6 bg-gray-800/60 rounded-xl border border-gray-700">
+            <h3 className="text-xl font-semibold">Fully Automated</h3>
+            <p className="mt-2 text-gray-300">
+              One workflow builds, validates, signs, and publishes your cloud images.
+            </p>
+          </div>
 
-      </div>
-    </div>
+          <div className="p-6 bg-gray-800/60 rounded-xl border border-gray-700">
+            <h3 className="text-xl font-semibold">Enterprise Ready</h3>
+            <p className="mt-2 text-gray-300">
+              SSO, governance, audit logs, and role-based access for global teams.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }
