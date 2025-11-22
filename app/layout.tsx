@@ -4,15 +4,15 @@ import Footer from "../components/Footer";
 
 export const metadata = {
   title: "DevVelocity",
-  description: "Automated multi-cloud image marketplace",
+  description: "Automated Multi-Cloud Image Marketplace",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="bg-black text-white flex flex-col min-h-screen">
+      <body className="bg-black text-white">
         <Navbar />
-        <main className="flex-1">{children}</main>
+        <main className="min-h-screen">{children}</main>
         <Footer />
       </body>
     </html>
