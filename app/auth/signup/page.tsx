@@ -4,15 +4,16 @@ import { useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import { useRouter } from "next/navigation";
 
-export default function SignupPage() {
+export default function SignUpPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  const handleSignup = async (e) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
@@ -28,59 +29,68 @@ export default function SignupPage() {
       return;
     }
 
-    // If email confirmation is ON in Supabase:
-    if (data?.user && !data.user.confirmed_at) {
-      alert("Check your email to confirm your account.");
-      setLoading(false);
-      return;
-    }
-
-    // Otherwise go to dashboard
+    // Redirect to dashboard after successful signup
     router.push("/dashboard");
-  };
+  }
 
   return (
-    <div className="max-w-md mx-auto mt-20 p-8 bg-white dark:bg-neutral-900 shadow rounded-lg border border-gray-200 dark:border-neutral-800">
-      <h1 className="text-2xl font-semibold mb-6 text-center">Create Account</h1>
+    <div className="flex items-center justify-center min-h-[70vh]">
+      <div className="w-full max-w-md bg-white dark:bg-neutral-900 p-8 rounded-xl shadow-md border dark:border-neutral-800">
 
-      {error && (
-        <p className="text-red-500 text-center mb-4">{error}</p>
-      )}
+        <h1 className="text-2xl font-semibold mb-6 text-center">
+          Create Your Account
+        </h1>
 
-      <form onSubmit={handleSignup} className="flex flex-col gap-4">
-        <input
-          type="email"
-          placeholder="Email"
-          className="p-3 border rounded-md dark:bg-neutral-800 dark:border-neutral-700"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <form onSubmit={handleSignUp} className="flex flex-col gap-4">
 
-        <input
-          type="password"
-          placeholder="Password"
-          className="p-3 border rounded-md dark:bg-neutral-800 dark:border-neutral-700"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+          {/* Email Input */}
+          <div>
+            <label className="block text-sm mb-1">Email</label>
+            <input
+              type="email"
+              required
+              className="w-full px-3 py-2 rounded-md border dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800 outline-none"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="p-3 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-        >
-          {loading ? "Creating account..." : "Sign Up"}
-        </button>
-      </form>
+          {/* Password Input */}
+          <div>
+            <label className="block text-sm mb-1">Password</label>
+            <input
+              type="password"
+              required
+              className="w-full px-3 py-2 rounded-md border dark:border-neutral-700 bg-gray-50 dark:bg-neutral-800 outline-none"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
 
-      <p className="text-center mt-4 text-sm text-gray-500">
-        Already have an account?{" "}
-        <a href="/auth/login" className="underline text-blue-600">
-          Log in
-        </a>
-      </p>
+          {/* Error Message */}
+          {error && (
+            <p className="text-red-500 text-sm text-center">{error}</p>
+          )}
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition"
+          >
+            {loading ? "Creating account..." : "Sign Up"}
+          </button>
+        </form>
+
+        {/* Login Link */}
+        <div className="text-center mt-4 text-sm">
+          Already have an account?{" "}
+          <a href="/auth/login" className="text-blue-600 hover:underline">
+            Login here
+          </a>
+        </div>
+
+      </div>
     </div>
   );
 }
