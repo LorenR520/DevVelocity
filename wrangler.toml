@@ -1,1 +1,3 @@
+name = "devvelocity"
+
 pages_build_output_dir = ".vercel/output/static"
