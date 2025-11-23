@@ -1,26 +1,61 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export default function Breadcrumb() {
-  const path = usePathname().split("/").filter(Boolean);
+  const pathname = usePathname();
+
+  // Split into parts, remove the empty first item '/'
+  const parts = pathname.split("/").filter(Boolean);
+
+  // Build breadcrumbs with links
+  const breadcrumbs = parts.map((part, index) => {
+    const href = "/" + parts.slice(0, index + 1).join("/");
+
+    return {
+      label: part
+        .replace(/-/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase()),
+      href,
+      isLast: index === parts.length - 1,
+    };
+  });
+
+  // Hide breadcrumb on homepage
+  if (pathname === "/") return null;
 
   return (
-    <div className="text-sm text-white/50 mb-6 flex space-x-2">
-      <Link href="/">Home</Link>
-      {path.map((segment, index) => {
-        const href = "/" + path.slice(0, index + 1).join("/");
+    <nav className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+      <ol className="flex items-center gap-2 flex-wrap">
+        <li>
+          <Link
+            href="/"
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition"
+          >
+            Home
+          </Link>
+        </li>
 
-        return (
-          <div className="flex items-center space-x-2" key={index}>
+        {breadcrumbs.map((crumb, index) => (
+          <li key={index} className="flex items-center gap-2">
             <span>/</span>
-            <Link className="capitalize text-white" href={href}>
-              {segment.replace("-", " ")}
-            </Link>
-          </div>
-        );
-      })}
-    </div>
+
+            {!crumb.isLast ? (
+              <Link
+                href={crumb.href}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition"
+              >
+                {crumb.label}
+              </Link>
+            ) : (
+              <span className="text-gray-900 dark:text-gray-300 font-medium">
+                {crumb.label}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }
