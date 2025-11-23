@@ -1,26 +1,51 @@
-// components/Footer.tsx
-
 export default function Footer() {
+  const year = new Date().getFullYear();
+
   return (
-    <footer className="w-full mt-20 border-t border-gray-200 bg-white">
-      <div className="max-w-7xl mx-auto px-6 py-10 text-sm text-gray-600">
-        <div className="flex justify-between">
-          <div>
-            <p className="font-semibold text-green-800">DevVelocity</p>
-            <p className="mt-2 text-gray-500">
-              Prebuilt multi-cloud environments for developers, startups, and enterprise.
-            </p>
-          </div>
+    <footer className="border-t border-gray-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 mt-20">
+      <div className="max-w-7xl mx-auto px-6 py-10 text-center">
+        
+        {/* BRAND */}
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">
+          DevVelocity
+        </h2>
 
-          <div className="space-y-2">
-            <a href="/docs/installation" className="hover:text-green-800 block">Docs</a>
-            <a href="/pricing" className="hover:text-green-800 block">Pricing</a>
-            <a href="/support" className="hover:text-green-800 block">Support</a>
-          </div>
-        </div>
+        {/* SUBTEXT */}
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+          Enterprise-grade cloud images & automated DevOps environments.
+        </p>
 
-        <p className="text-gray-400 text-xs mt-10">
-          © {new Date().getFullYear()} DevVelocity. All rights reserved.
+        {/* FOOTER NAV */}
+        <nav className="flex justify-center gap-6 text-sm mb-6">
+          <a
+            href="/docs/installation"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+          >
+            Docs
+          </a>
+          <a
+            href="/docs/pricing"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+          >
+            Pricing
+          </a>
+          <a
+            href="/auth/login"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+          >
+            Login
+          </a>
+          <a
+            href="/auth/signup"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 transition"
+          >
+            Sign Up
+          </a>
+        </nav>
+
+        {/* COPYRIGHT */}
+        <p className="text-xs text-gray-500 dark:text-gray-500">
+          © {year} DevVelocity. All rights reserved.
         </p>
       </div>
     </footer>
