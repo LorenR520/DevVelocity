@@ -1,6 +1,10 @@
-/** @type {import('next').NextConfig} */
+import { withOpenNext } from "@opennext/cf";
+
 const nextConfig = {
   reactStrictMode: false,
+  experimental: {
+    optimizeCss: true
+  }
 };
 
-export default nextConfig;
+export default withOpenNext(nextConfig);
