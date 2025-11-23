@@ -1,45 +1,53 @@
-"use client";
+{/* RIGHT SECTION */}
+<div className="hidden md:flex items-center gap-4">
 
-import Link from "next/link";
-import MobileSidebar from "./MobileSidebar";
-import { IoMoon, IoSunny } from "react-icons/io5";
-import SearchBar from "./SearchBar";
-import { supabase } from "../lib/supabase";
-import { useState, useEffect } from "react";
+  {/* Search bar */}
+  <SearchBar />
 
-export default function Navbar() {
+  {/* Theme Toggle */}
+  <button
+    onClick={toggleTheme}
+    className="p-2 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+  >
+    {dark ? (
+      <IoSunny size={20} className="text-yellow-300" />
+    ) : (
+      <IoMoon size={20} className="text-gray-700" />
+    )}
+  </button>
 
-  const [user, setUser] = useState(null);
+  {/* USER AUTH BUTTONS */}
+  {!user ? (
+    <>
+      <a
+        href="/auth/login"
+        className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+      >
+        Login
+      </a>
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-    });
-  }, []);
+      <a
+        href="/auth/signup"
+        className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition"
+      >
+        Sign Up
+      </a>
+    </>
+  ) : (
+    <>
+      <a
+        href="/dashboard"
+        className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+      >
+        Dashboard
+      </a>
 
-  async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  }
-
-  const [dark, setDark] = useState(false);
-
-  useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    if (stored === "dark") {
-      document.documentElement.classList.add("dark");
-      setDark(true);
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    if (dark) {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-      setDark(false);
-    } else {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-      setDark(true);
-    }
-  };
+      <button
+        onClick={logout}
+        className="px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600 transition"
+      >
+        Logout
+      </button>
+    </>
+  )}
+</div>
