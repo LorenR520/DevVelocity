@@ -3,14 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function DocsSidebar({ isMobile = false, onClose }: { isMobile?: boolean; onClose?: () => void }) {
+export default function DocsSidebar({
+  isMobile = false,
+  onClose,
+}: {
+  isMobile?: boolean;
+  onClose?: () => void;
+}) {
   const pathname = usePathname();
 
   const links = [
     { name: "Installation", href: "/docs/installation" },
     { name: "Pricing", href: "/docs/pricing" },
     { name: "Providers", href: "/docs/providers/aws" },
-    { name: "Support", href: "/support" },
+    // Support removed completely
   ];
 
   return (
