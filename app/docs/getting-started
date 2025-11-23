@@ -1,28 +1,33 @@
-export default function GettingStarted() {
+// app/docs/getting-started/layout.tsx
+
+import DocsSidebar from "../../../components/DocsSidebar";
+import MobileSidebar from "../../../components/MobileSidebar";
+
+export const metadata = {
+  title: "Getting Started – DevVelocity Docs",
+  description:
+    "Learn how to install, configure, and deploy DevVelocity optimized cloud images across AWS, Azure, GCP, OCI, DigitalOcean, Linode, and Vultr.",
+};
+
+export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="p-10 max-w-3xl mx-auto">
-      <h1 className="text-4xl font-bold mb-6">Getting Started</h1>
+    <div className="flex min-h-screen">
 
-      <p className="text-lg opacity-80 mb-4">
-        DevVelocity allows you to deploy pre-configured images across multiple cloud
-        providers with speed, consistency, and reliability.
-      </p>
+      {/* SIDEBAR (Desktop) */}
+      <aside className="hidden md:block w-64 border-r border-gray-200 dark:border-neutral-800">
+        <DocsSidebar />
+      </aside>
 
-      <h2 className="text-2xl font-semibold mt-6 mb-2">What You’ll Learn</h2>
-      <ul className="list-disc ml-6 space-y-2">
-        <li>How DevVelocity builds cloud-ready OS images</li>
-        <li>How to choose a deployment tier (Sandbox, Dev, Enterprise)</li>
-        <li>How to download and deploy images from the marketplace</li>
-        <li>How to use provider-specific documentation</li>
-      </ul>
+      {/* MOBILE SIDEBAR */}
+      <div className="md:hidden p-4 border-b border-gray-200 dark:border-neutral-800 flex items-center justify-between w-full">
+        <MobileSidebar />
+        <h1 className="text-lg font-semibold">Docs</h1>
+      </div>
 
-      <h2 className="text-2xl font-semibold mt-6 mb-2">Before You Begin</h2>
-      <ul className="list-disc ml-6 space-y-2">
-        <li>Sign in with your DevVelocity account</li>
-        <li>Select your cloud provider</li>
-        <li>Choose an image tier</li>
-        <li>Follow the deployment guide for that provider</li>
-      </ul>
+      {/* MAIN CONTENT */}
+      <main className="flex-1 p-6">
+        {children}
+      </main>
     </div>
   );
 }
