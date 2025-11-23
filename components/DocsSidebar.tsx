@@ -15,8 +15,9 @@ export default function DocsSidebar({
   const links = [
     { name: "Installation", href: "/docs/installation" },
     { name: "Pricing", href: "/docs/pricing" },
+
+    // Providers main entry point
     { name: "Providers", href: "/docs/providers/aws" },
-    // Support removed completely
   ];
 
   return (
@@ -29,15 +30,16 @@ export default function DocsSidebar({
     >
       {links.map((item) => {
         const active = pathname.startsWith(item.href);
+
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={() => isMobile && onClose && onClose()}
-            className={`block px-3 py-2 rounded-md text-sm font-medium ${
+            className={`block px-3 py-2 rounded-md text-sm font-medium transition ${
               active
                 ? "bg-blue-600 text-white"
-                : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800"
+                : "text-gray-800 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800"
             }`}
           >
             {item.name}
