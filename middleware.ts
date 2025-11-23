@@ -1,48 +1,16 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 
-// Protected routes that require user login
-const protectedRoutes = [
-  "/dashboard",
-  "/providers",
-  "/account",
-  "/billing",
-];
-
-// Routes that require a paid subscription
-const paidRoutes = [
-  "/enterprise",
-  "/automations",
-  "/pipelines",
-  "/images/hardened",
-];
-
-export async function middleware(req: NextRequest) {
+export function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
-  const pathname = req.nextUrl.pathname;
+  const session = req.cookies.get("sb-access-token");
 
-  // Read cookies set by Supabase Auth
-  const token = req.cookies.get("sb-access-token")?.value;
+  const protectedPaths = ["/dashboard", "/billing"];
+  const attemptedPath = url.pathname;
 
-  // ---- AUTH REQUIRED ----
-  if (protectedRoutes.some((route) => pathname.startsWith(route))) {
-    if (!token) {
+  if (protectedPaths.some((path) => attemptedPath.startsWith(path))) {
+    if (!session) {
       url.pathname = "/auth/login";
-      return NextResponse.redirect(url);
-    }
-  }
-
-  // ---- SUBSCRIPTION REQUIRED ----
-  if (paidRoutes.some((route) => pathname.startsWith(route))) {
-    const sub = req.cookies.get("subscription-tier")?.value;
-
-    if (!token) {
-      url.pathname = "/auth/login";
-      return NextResponse.redirect(url);
-    }
-
-    if (!sub || sub !== "pro") {
-      url.pathname = "/pricing";
       return NextResponse.redirect(url);
     }
   }
@@ -50,16 +18,6 @@ export async function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
-// Required for middleware to run on all routes
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/providers/:path*",
-    "/account/:path*",
-    "/billing/:path*",
-    "/enterprise/:path*",
-    "/automations/:path*",
-    "/pipelines/:path*",
-    "/images/:path*",
-  ],
+  matcher: ["/dashboard/:path*", "/billing/:path*"],
 };
