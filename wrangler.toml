@@ -1,5 +1,8 @@
+# Required name for Pages project
 name = "devvelocity"
-compatibility_date = "2024-10-01"
 
-[pages]
-build_output_dir = ".open-next"
+# Cloudflare Pages build output for Next-on-Pages
+pages_build_output_dir = ".vercel/output/static"
+
+[build]
+command = "npx @cloudflare/next-on-pages@1"
