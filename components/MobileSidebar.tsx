@@ -10,7 +10,6 @@ export default function MobileSidebar() {
 
   return (
     <>
-      {/* OPEN BUTTON */}
       <button
         onClick={() => setOpen(true)}
         className="md:hidden p-2 text-gray-700 dark:text-gray-300"
@@ -18,7 +17,6 @@ export default function MobileSidebar() {
         <RxHamburgerMenu size={24} />
       </button>
 
-      {/* OVERLAY */}
       {open && (
         <div
           onClick={() => setOpen(false)}
@@ -26,20 +24,18 @@ export default function MobileSidebar() {
         />
       )}
 
-      {/* SLIDE-OUT DRAWER */}
       <div
         className={`fixed top-0 left-0 h-full w-64 bg-white dark:bg-neutral-900 shadow-xl z-50 transform transition-transform duration-300 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* CLOSE BUTTON */}
         <div className="flex justify-end p-4">
           <button onClick={() => setOpen(false)}>
             <IoClose size={26} className="text-gray-700 dark:text-gray-300" />
           </button>
         </div>
 
-        {/* MOBILE NAVIGATION LINKS */}
+        {/* NAVIGATION */}
         <nav className="flex flex-col space-y-4 px-6 text-gray-900 dark:text-gray-200">
 
           <Link href="/installation" onClick={() => setOpen(false)}>
@@ -54,7 +50,6 @@ export default function MobileSidebar() {
             Providers
           </Link>
 
-          {/* AUTH */}
           <Link href="/auth/login" onClick={() => setOpen(false)}>
             Login
           </Link>
