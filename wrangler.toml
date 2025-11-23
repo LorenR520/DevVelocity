@@ -1,8 +1,2 @@
-# Required name for Pages project
 name = "devvelocity"
-
-# Cloudflare Pages build output for Next-on-Pages
 pages_build_output_dir = ".vercel/output/static"
-
-[build]
-command = "npx @cloudflare/next-on-pages@1"
