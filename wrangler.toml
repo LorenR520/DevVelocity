@@ -1,13 +1,1 @@
-name = "devvelocity"
-
-# Required for Cloudflare Pages
 pages_build_output_dir = ".vercel/output/static"
-
-[build]
-command = "npm run build"
-
-[pages]
-classic_compat = true
-
-[env.production]
-node_compat = true
