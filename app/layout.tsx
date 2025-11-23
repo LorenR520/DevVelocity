@@ -1,21 +1,30 @@
 // app/layout.tsx
 import "./globals.css";
+
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 
 export const metadata = {
-  title: "DevVelocity – Cloud Images & DevOps Environments",
-  description: "Enterprise-grade prebuilt cloud environments for AWS, Azure, GCP, OCI, Linode, DigitalOcean, and Vultr.",
+  title: "DevVelocity",
+  description:
+    "Automated enterprise cloud image deployment across AWS, Azure, GCP, Oracle, Linode, Vultr & DigitalOcean.",
 };
 
-export default function RootLayout({ children }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en" className="">
-      <body className="bg-gray-50 text-gray-900 antialiased">
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen bg-white dark:bg-neutral-950 text-gray-900 dark:text-gray-100 antialiased">
+        {/* NAVBAR */}
         <Navbar />
-        <main className="max-w-7xl mx-auto px-6 py-10">
-          {children}
-        </main>
+
+        {/* MAIN CONTENT WRAPPER */}
+        <main className="pt-20 px-4 md:px-0">{children}</main>
+
+        {/* FOOTER */}
         <Footer />
       </body>
     </html>
