@@ -1,60 +1,75 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import MobileSidebar from "./MobileSidebar";
-import { useState, useEffect } from "react";
+import SearchBar from "./SearchBar";
 import { IoMoon, IoSunny } from "react-icons/io5";
-import { supabase } from "../lib/supabase";
 
 export default function Navbar() {
+  const pathname = usePathname();
+
   const [dark, setDark] = useState(false);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
 
-  // Load theme and user
+  /* ----------------------- */
+  /*   THEME INITIALIZATION   */
+  /* ----------------------- */
   useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    if (stored === "dark") {
-      document.documentElement.classList.add("dark");
-      setDark(true);
-    }
+    const saved = localStorage.getItem("theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-    });
+    const enabled = saved === "dark" || (!saved && prefersDark);
+    setDark(enabled);
+    document.documentElement.classList.toggle("dark", enabled);
   }, []);
 
-  // Toggle theme
   const toggleTheme = () => {
-    if (dark) {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-      setDark(false);
-    } else {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-      setDark(true);
-    }
+    const newMode = !dark;
+    setDark(newMode);
+    localStorage.setItem("theme", newMode ? "dark" : "light");
+    document.documentElement.classList.toggle("dark", newMode);
   };
 
-  async function logout() {
+  /* ----------------------- */
+  /*    LOAD AUTH USER       */
+  /* ----------------------- */
+  useEffect(() => {
+    async function loadUser() {
+      const { data } = await supabase.auth.getUser();
+      setUser(data?.user ?? null);
+    }
+    loadUser();
+  }, []);
+
+  const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/";
-  }
+  };
+
+  /* ----------------------- */
+  /*         RENDER          */
+  /* ----------------------- */
 
   return (
-    <header className="w-full border-b border-gray-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50 backdrop-blur-md sticky top-0 z-50">
+    <nav className="fixed top-0 left-0 w-full z-50 border-b border-gray-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
 
-        {/* LEFT */}
-        <div className="flex items-center gap-3">
+        {/* LEFT SECTION */}
+        <div className="flex items-center gap-4">
           <MobileSidebar />
           <Link href="/" className="text-xl font-semibold">
             DevVelocity
           </Link>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT SECTION */}
         <div className="hidden md:flex items-center gap-4">
+
+          {/* Search */}
+          <SearchBar />
 
           {/* Theme Toggle */}
           <button
@@ -64,23 +79,23 @@ export default function Navbar() {
             {dark ? (
               <IoSunny size={20} className="text-yellow-300" />
             ) : (
-              <IoMoon size={20} className="text-gray-700" />
+              <IoMoon size={20} className="text-gray-700 dark:text-gray-300" />
             )}
           </button>
 
-          {/* AUTH BUTTONS */}
+          {/* AUTH CONTROLS */}
           {!user ? (
             <>
               <Link
                 href="/auth/login"
-                className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+                className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800"
               >
                 Login
               </Link>
 
               <Link
                 href="/auth/signup"
-                className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition"
+                className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700"
               >
                 Sign Up
               </Link>
@@ -96,15 +111,14 @@ export default function Navbar() {
 
               <button
                 onClick={logout}
-                className="px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600 transition"
+                className="px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600"
               >
                 Logout
               </button>
             </>
           )}
         </div>
-
       </div>
-    </header>
+    </nav>
   );
 }
