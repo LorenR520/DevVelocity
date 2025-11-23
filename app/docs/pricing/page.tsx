@@ -1,85 +1,83 @@
-// app/docs/pricing/page.tsx
-
-import DocsContent from "../../../components/DocsContent";
-
-export const metadata = {
-  title: "Pricing – DevVelocity Docs",
-  description: "Pricing structure for DevVelocity cloud images, automation, and enterprise builds.",
-};
-
 export default function PricingPage() {
   return (
-    <DocsContent>
-      <h1>Pricing</h1>
-
-      <p>
-        DevVelocity provides predictable pricing for individuals, teams, and enterprise 
-        organizations. All plans include secure access to cloud images, automated 
-        deployments, and multi-cloud support.
+    <div className="max-w-4xl mx-auto py-16 px-6">
+      <h1 className="text-4xl font-bold mb-4">Pricing</h1>
+      <p className="text-gray-600 dark:text-gray-300 mb-12">
+        Choose the plan that matches your workflow. Upgrade anytime.
       </p>
 
-      <h2>Subscription Tiers</h2>
+      <div className="grid md:grid-cols-3 gap-8">
 
-      <h3>Free Tier</h3>
-      <ul>
-        <li>Basic sandbox images</li>
-        <li>Single-provider testing environment</li>
-        <li>No automation features</li>
-        <li>No hardened enterprise builds</li>
-      </ul>
+        {/* FREE */}
+        <div className="border dark:border-neutral-800 rounded-xl p-6 bg-white dark:bg-neutral-900 shadow">
+          <h2 className="text-2xl font-semibold mb-2">Free</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Great for beginners and testing environments.
+          </p>
+          <p className="text-4xl font-bold mb-6">$0</p>
 
-      <h3>Pro Tier</h3>
-      <ul>
-        <li>Access to all enterprise-grade images</li>
-        <li>Unlimited deployments</li>
-        <li>Basic automation + versioned builds</li>
-        <li>Email notifications</li>
-      </ul>
+          <ul className="text-sm space-y-2 mb-6">
+            <li>• Access to docs</li>
+            <li>• Access to free builds</li>
+            <li>• Community templates</li>
+          </ul>
 
-      <h3>Enterprise Tier</h3>
-      <ul>
-        <li>Hardened & fully-secured enterprise images</li>
-        <li>Zero-trust architecture templates</li>
-        <li>Multi-cloud orchestration</li>
-        <li>Pipeline automation</li>
-        <li>Private builds</li>
-      </ul>
+          <a
+            href="/auth/signup"
+            className="block text-center px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800"
+          >
+            Get Started
+          </a>
+        </div>
 
-      <h2>Image Usage</h2>
-      <p>
-        DevVelocity uses a consumption-based model for cloud image deployments.  
-        Costs vary slightly based on the provider:
-      </p>
+        {/* PRO */}
+        <div className="border-2 border-blue-600 rounded-xl p-6 bg-white dark:bg-neutral-900 shadow-lg">
+          <h2 className="text-2xl font-semibold mb-2">Pro</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Best for DevOps engineers building frequently.
+          </p>
+          <p className="text-4xl font-bold mb-1">$39</p>
+          <p className="text-sm text-gray-500 mb-6">per month</p>
 
-      <ul>
-        <li>AWS AMI deployments – standard marketplace pricing</li>
-        <li>Azure VM images – region-based cost modifiers</li>
-        <li>GCP Compute images – hourly billing</li>
-        <li>OCI/Linode/DigitalOcean/Vultr – flat monthly or hourly</li>
-      </ul>
+          <ul className="text-sm space-y-2 mb-6">
+            <li>• Unlimited image builds</li>
+            <li>• Priority queue access</li>
+            <li>• Multi-cloud deployments</li>
+            <li>• Full provider templates</li>
+          </ul>
 
-      <h2>Build Automation Credits</h2>
-      <p>
-        Enterprise plans include automation credits used for:
-      </p>
+          <a
+            href="/auth/signup"
+            className="block text-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Upgrade
+          </a>
+        </div>
 
-      <ul>
-        <li>Custom image generation</li>
-        <li>Security hardening</li>
-        <li>Pipeline rebuilds</li>
-        <li>Multi-cloud replication</li>
-      </ul>
+        {/* ENTERPRISE */}
+        <div className="border dark:border-neutral-800 rounded-xl p-6 bg-white dark:bg-neutral-900 shadow">
+          <h2 className="text-2xl font-semibold mb-2">Enterprise</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Hardened images. Multi-region builds. Zero-touch automation.
+          </p>
+          <p className="text-4xl font-bold mb-1">Custom</p>
+          <p className="text-sm text-gray-500 mb-6">volume pricing</p>
 
-      <p>
-        Additional credits can be purchased at discounted volume pricing.
-      </p>
+          <ul className="text-sm space-y-2 mb-6">
+            <li>• Hardened enterprise images</li>
+            <li>• Multi-region build pipeline</li>
+            <li>• Compliance baselines</li>
+            <li>• API build automation</li>
+          </ul>
 
-      <h2>Need Help Choosing?</h2>
-      <p>
-        Most teams start with <strong>Pro</strong> and upgrade to 
-        <strong>Enterprise</strong> when they expand multi-cloud or need 
-        hardened security templates.
-      </p>
-    </DocsContent>
+          <a
+            href="/auth/signup"
+            className="block text-center px-4 py-2 bg-gray-900 dark:bg-white dark:text-black text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-200"
+          >
+            Contact Sales
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }
