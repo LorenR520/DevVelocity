@@ -3,9 +3,9 @@
 import Link from "next/link";
 import MobileSidebar from "./MobileSidebar";
 import SearchBar from "./SearchBar";
-import { IoMoon, IoSunny } from "react-icons/io5";
-import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { useState, useEffect } from "react";
+import { IoMoon, IoSunny } from "react-icons/io5";
 
 export default function Navbar() {
   // USER STATE
@@ -13,17 +13,16 @@ export default function Navbar() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
+      setUser(data.user || null);
     });
   }, []);
 
-  // LOGOUT
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/";
   }
 
-  // DARK MODE STATE
+  // THEME STATE
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -50,7 +49,7 @@ export default function Navbar() {
     <header className="w-full border-b border-gray-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
 
-        {/* LEFT */}
+        {/* LEFT SIDE */}
         <div className="flex items-center gap-3">
           <MobileSidebar />
           <Link href="/" className="text-xl font-semibold">
@@ -58,7 +57,7 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT SIDE (Desktop Only) */}
         <div className="hidden md:flex items-center gap-4">
 
           {/* Search */}
@@ -72,7 +71,7 @@ export default function Navbar() {
             {dark ? (
               <IoSunny size={20} className="text-yellow-300" />
             ) : (
-              <IoMoon size={20} className="text-gray-700" />
+              <IoMoon size={20} className="text-gray-700 dark:text-gray-300" />
             )}
           </button>
 
@@ -85,6 +84,7 @@ export default function Navbar() {
               >
                 Login
               </Link>
+
               <Link
                 href="/auth/signup"
                 className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 transition"
@@ -100,6 +100,7 @@ export default function Navbar() {
               >
                 Dashboard
               </Link>
+
               <button
                 onClick={logout}
                 className="px-4 py-2 rounded-md bg-red-500 text-white hover:bg-red-600 transition"
