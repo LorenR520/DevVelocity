@@ -1,26 +1,73 @@
-export default function Installation() {
-  return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold mb-4">Installation</h1>
+// app/docs/installation/page.tsx
 
-      <p className="opacity-70 mb-4">
-        This guide walks you through installing and configuring DevVelocity images across supported cloud providers.
+import DocsContent from "../../../components/DocsContent";
+
+export const metadata = {
+  title: "Installation – DevVelocity Docs",
+  description: "How to install and deploy DevVelocity enterprise cloud images.",
+};
+
+export default function InstallationPage() {
+  return (
+    <DocsContent>
+      <h1>Installation</h1>
+
+      <p>
+        DevVelocity provides enterprise-grade cloud images designed for AWS, Azure,
+        Google Cloud, OCI, Linode, DigitalOcean, and Vultr. This guide walks you
+        through setting up access, deploying your first image, and managing builds.
       </p>
 
-      <h2 className="text-2xl font-semibold mt-6 mb-2">Prerequisites</h2>
-      <ul className="list-disc ml-6 opacity-80 space-y-1">
-        <li>A valid DevVelocity account</li>
-        <li>Cloud provider account (AWS, Azure, GCP, OCI)</li>
-        <li>Basic command-line familiarity</li>
+      <h2>1. Create an Account</h2>
+      <p>
+        Before deploying, you&apos;ll need a DevVelocity account. Sign up and choose a
+        subscription tier based on your needs.
+      </p>
+
+      <ul>
+        <li>Free – limited testing images</li>
+        <li>Pro – all images + automation tools</li>
+        <li>Enterprise – hardened builds, multi-cloud orchestration</li>
       </ul>
 
-      <h2 className="text-2xl font-semibold mt-6 mb-2">Install Steps</h2>
-      <ol className="list-decimal ml-6 opacity-80 space-y-1">
-        <li>Choose a cloud provider</li>
-        <li>Select a tiered image (Sandbox, Developer, Enterprise)</li>
-        <li>Copy the deployment script displayed on the image page</li>
-        <li>Run the script in your cloud environment</li>
+      <h2>2. Configure Your Cloud Provider</h2>
+      <p>
+        Connect your provider to allow one-click deployment. DevVelocity never stores 
+        your credentials — authentication happens through secure OAuth or API tokens.
+      </p>
+
+      <ol>
+        <li>AWS → IAM Role + Policy</li>
+        <li>Azure → Service Principal</li>
+        <li>GCP → Service Account JSON</li>
+        <li>OCI → Tenancy + API Key</li>
       </ol>
-    </div>
+
+      <h2>3. Deploy Your First Image</h2>
+      <p>
+        After connection, navigate to <strong>Providers</strong> and choose your cloud.
+      </p>
+
+      <pre>
+        <code>
+{`# Example: Deploying AWS Image
+1. Select Provider → AWS
+2. Choose Enterprise AMI
+3. Click “Deploy”
+4. Confirm region and instance type
+`}
+        </code>
+      </pre>
+
+      <h2>4. What Happens Next?</h2>
+      <p>
+        DevVelocity provisions, configures, and hardens your environment automatically
+        using enterprise security best practices.
+      </p>
+
+      <p>
+        You can track build status in your <strong>Dashboard</strong>.
+      </p>
+    </DocsContent>
   );
 }
