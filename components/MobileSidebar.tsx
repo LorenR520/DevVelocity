@@ -10,7 +10,7 @@ export default function MobileSidebar() {
 
   return (
     <>
-      {/* OPEN BUTTON */}
+      {/* MOBILE MENU BUTTON */}
       <button
         onClick={() => setOpen(true)}
         className="md:hidden p-2 text-gray-700 dark:text-gray-300"
@@ -18,7 +18,7 @@ export default function MobileSidebar() {
         <RxHamburgerMenu size={24} />
       </button>
 
-      {/* BACKDROP OVERLAY */}
+      {/* OVERLAY */}
       {open && (
         <div
           onClick={() => setOpen(false)}
@@ -26,21 +26,28 @@ export default function MobileSidebar() {
         />
       )}
 
-      {/* SLIDE-IN DRAWER */}
+      {/* DRAWER */}
       <div
-        className={`fixed top-0 left-0 h-full z-50 transform transition-transform duration-300 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`
+          fixed top-0 left-0 h-full z-50
+          transform transition-transform duration-300
+          ${open ? "translate-x-0" : "-translate-x-full"}
+        `}
       >
-        <div className="w-64 h-full bg-white dark:bg-neutral-900 shadow-xl">
+        {/* SIDEBAR CONTAINER */}
+        <div className="w-64 h-full bg-white dark:bg-neutral-900 shadow-xl flex flex-col">
+          
           {/* CLOSE BUTTON */}
           <div className="flex justify-end p-4">
             <button onClick={() => setOpen(false)}>
-              <IoClose size={26} className="text-gray-700 dark:text-gray-300" />
+              <IoClose
+                size={26}
+                className="text-gray-700 dark:text-gray-300"
+              />
             </button>
           </div>
 
-          {/* SIDEBAR LINKS */}
+          {/* DOCS SIDEBAR LINKS */}
           <DocsSidebar isMobile onClose={() => setOpen(false)} />
         </div>
       </div>
