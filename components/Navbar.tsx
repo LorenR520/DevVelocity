@@ -2,37 +2,28 @@
 
 import Link from "next/link";
 import MobileSidebar from "./MobileSidebar";
-import SearchBar from "./SearchBar";
-import { supabase } from "../lib/supabase";
 import { useState, useEffect } from "react";
 import { IoMoon, IoSunny } from "react-icons/io5";
+import { supabase } from "../lib/supabase";
 
 export default function Navbar() {
-  // USER STATE
+  const [dark, setDark] = useState(false);
   const [user, setUser] = useState(null);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user || null);
-    });
-  }, []);
-
-  async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  }
-
-  // THEME STATE
-  const [dark, setDark] = useState(false);
-
+  // Load theme and user
   useEffect(() => {
     const stored = localStorage.getItem("theme");
     if (stored === "dark") {
       document.documentElement.classList.add("dark");
       setDark(true);
     }
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
   }, []);
 
+  // Toggle theme
   const toggleTheme = () => {
     if (dark) {
       document.documentElement.classList.remove("dark");
@@ -45,11 +36,16 @@ export default function Navbar() {
     }
   };
 
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  }
+
   return (
     <header className="w-full border-b border-gray-200 dark:border-neutral-800 bg-white/50 dark:bg-neutral-900/50 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
 
-        {/* LEFT SIDE */}
+        {/* LEFT */}
         <div className="flex items-center gap-3">
           <MobileSidebar />
           <Link href="/" className="text-xl font-semibold">
@@ -57,11 +53,8 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* RIGHT SIDE (Desktop Only) */}
+        {/* RIGHT */}
         <div className="hidden md:flex items-center gap-4">
-
-          {/* Search */}
-          <SearchBar />
 
           {/* Theme Toggle */}
           <button
@@ -71,7 +64,7 @@ export default function Navbar() {
             {dark ? (
               <IoSunny size={20} className="text-yellow-300" />
             ) : (
-              <IoMoon size={20} className="text-gray-700 dark:text-gray-300" />
+              <IoMoon size={20} className="text-gray-700" />
             )}
           </button>
 
@@ -96,7 +89,7 @@ export default function Navbar() {
             <>
               <Link
                 href="/dashboard"
-                className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+                className="px-4 py-2 rounded-md border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800"
               >
                 Dashboard
               </Link>
