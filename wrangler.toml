@@ -1,8 +1,12 @@
 name = "devvelocity"
-compatibility_flags = [ "nodejs_compat" ]
 
 [build]
 command = "npm run build"
-cwd = "."
-watch_dir = "."
+destination = ".vercel/output/static"
+
+[pages]
 pages_build_output_dir = ".vercel/output/static"
+classic_compat = true
+
+[env.production]
+node_compat = true
