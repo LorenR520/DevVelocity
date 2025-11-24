@@ -4,14 +4,22 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && npx @cloudflare/next-on-pages@1",
+    "build": "npx @cloudflare/next-on-pages@1 build",
+    "preview": "npx @cloudflare/next-on-pages@1 preview",
     "start": "next start"
   },
   "dependencies": {
-    "@supabase/auth-helpers-nextjs": "0.7.4",
-    "@supabase/supabase-js": "^2.46.1",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/supabase-js": "^2.48.1",
     "next": "14.2.3",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "react-icons": "4.12.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.2.2"
   }
 }
