@@ -1,7 +1,4 @@
 name = "devvelocity"
 
-# Required for Pages using next-on-pages
+[pages]
 pages_build_output_dir = ".vercel/output/static"
-
-compatibility_date = "2023-10-01"
-compatibility_flags = ["nodejs_compat"]
