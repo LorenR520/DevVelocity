@@ -1,5 +1,8 @@
 name: Generate Correct Lockfile
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
 
