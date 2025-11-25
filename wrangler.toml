@@ -1,8 +1,0 @@
-name = "devvelocity"
-compatibility_date = "2024-01-01"
-
-# Required for Cloudflare Pages + Next.js via next-on-pages
-build_output_dir = ".vercel/output/static"
-
-[build]
-command = "npm run build"
