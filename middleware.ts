@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
-  const session = req.cookies.get("sb-access-token");
 
+  // Supabase cookies (Cloudflare + Next.js compatible)
+  const accessToken = req.cookies.get("sb-access-token")?.value;
+  const refreshToken = req.cookies.get("sb-refresh-token")?.value;
+
+  // Protected routes
   const protectedPaths = ["/dashboard", "/billing"];
-  const attemptedPath = url.pathname;
+  const path = url.pathname;
 
-  if (protectedPaths.some((path) => attemptedPath.startsWith(path))) {
-    if (!session) {
-      url.pathname = "/auth/login";
-      return NextResponse.redirect(url);
-    }
+  const isProtected = protectedPaths.some((p) => path.startsWith(p));
+
+  if (isProtected && !accessToken && !refreshToken) {
+    url.pathname = "/auth/login";
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
