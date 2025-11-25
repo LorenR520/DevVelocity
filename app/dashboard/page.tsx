@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
@@ -50,10 +50,8 @@ export default function DashboardPage() {
         Manage your cloud builds, subscriptions, and automation.
       </p>
 
-      {/* GRID */}
       <div className="grid md:grid-cols-3 gap-6">
 
-        {/* CLOUD PROVIDERS */}
         <div className="p-6 rounded-xl border dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow">
           <h2 className="text-lg font-semibold mb-2">Cloud Providers</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -67,7 +65,6 @@ export default function DashboardPage() {
           </a>
         </div>
 
-        {/* SUBSCRIPTIONS */}
         <div className="p-6 rounded-xl border dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow">
           <h2 className="text-lg font-semibold mb-2">Subscription</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -81,7 +78,6 @@ export default function DashboardPage() {
           </a>
         </div>
 
-        {/* ACCOUNT */}
         <div className="p-6 rounded-xl border dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow">
           <h2 className="text-lg font-semibold mb-2">Account Settings</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
