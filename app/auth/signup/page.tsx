@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function SignUpPage() {
@@ -18,7 +18,7 @@ export default function SignUpPage() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
     });
@@ -29,7 +29,6 @@ export default function SignUpPage() {
       return;
     }
 
-    // Redirect to dashboard after successful signup
     router.push("/dashboard");
   }
 
@@ -43,7 +42,6 @@ export default function SignUpPage() {
 
         <form onSubmit={handleSignUp} className="flex flex-col gap-4">
 
-          {/* Email Input */}
           <div>
             <label className="block text-sm mb-1">Email</label>
             <input
@@ -55,7 +53,6 @@ export default function SignUpPage() {
             />
           </div>
 
-          {/* Password Input */}
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input
@@ -67,12 +64,10 @@ export default function SignUpPage() {
             />
           </div>
 
-          {/* Error Message */}
           {error && (
             <p className="text-red-500 text-sm text-center">{error}</p>
           )}
 
-          {/* Submit Button */}
           <button
             type="submit"
             disabled={loading}
@@ -82,7 +77,6 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        {/* Login Link */}
         <div className="text-center mt-4 text-sm">
           Already have an account?{" "}
           <a href="/auth/login" className="text-blue-600 hover:underline">
