@@ -16,11 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Ensure latest main is checked out
+      - name: Hard reset to remote main
         run: |
           git fetch origin main
           git checkout main
-          git pull origin main --rebase
+          git reset --hard origin/main
 
       - name: Setup Node
         uses: actions/setup-node@v4
