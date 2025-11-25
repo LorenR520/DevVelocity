@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function BillingPage() {
@@ -9,7 +9,6 @@ export default function BillingPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user
   useEffect(() => {
     async function loadUser() {
       const { data } = await supabase.auth.getUser();
@@ -25,7 +24,6 @@ export default function BillingPage() {
   }, []);
 
   async function upgradeToPro() {
-    // TEMPORARY UPGRADE SYSTEM (no Stripe yet)
     const { error } = await supabase
       .from("profiles")
       .update({ plan: "pro" })
@@ -35,8 +33,8 @@ export default function BillingPage() {
       alert("🎉 Your account has been upgraded to Pro!");
       router.push("/dashboard");
     } else {
-      console.error(error);
       alert("Something went wrong upgrading your plan.");
+      console.error(error);
     }
   }
 
