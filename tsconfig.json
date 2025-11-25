@@ -15,7 +15,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@/lib/*": ["lib/*"]     // <-- this is the addition you asked for
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
