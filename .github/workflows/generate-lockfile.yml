@@ -10,32 +10,30 @@ jobs:
   generate:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: ./  # 👈 FORCES ACTIONS TO RUN IN REPO ROOT
-
     steps:
       - name: Checkout full history
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
+      - name: Ensure latest main is checked out
+        run: |
+          git fetch origin main
+          git checkout main
+          git pull origin main --rebase
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies (generate lockfile)
+      - name: Install dependencies
         run: npm install
 
-      - name: Configure git identity
+      - name: Configure Git identity
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-
-      - name: Pull latest main for safety
-        run: |
-          git pull origin main --rebase || true
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
 
       - name: Commit lockfile
         run: |
@@ -44,4 +42,4 @@ jobs:
 
       - name: Push changes
         run: |
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} main:main --force
