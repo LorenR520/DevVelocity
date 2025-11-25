@@ -1,1 +1,57 @@
 
+name: Generate Correct Lockfile
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set working directory
+        run: echo "ROOT=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
+
+      - name: Debug directory
+        run: pwd && ls -a
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: ${{ env.ROOT }}
+        run: |
+          ls -a
+          npm install
+
+      - name: Configure git identity
+        working-directory: ${{ env.ROOT }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Pull latest main
+        working-directory: ${{ env.ROOT }}
+        run: git pull origin main --rebase || true
+
+      - name: Commit lockfile
+        working-directory: ${{ env.ROOT }}
+        run: |
+          ls -a
+          git add package-lock.json
+          git commit -m "Auto-generate synchronized lockfile" || true
+
+      - name: Push changes
+        working-directory: ${{ env.ROOT }}
+        run: |
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
