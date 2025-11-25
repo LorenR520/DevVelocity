@@ -3,13 +3,9 @@ name: Generate Correct Lockfile
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   generate:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -21,18 +17,18 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies normally (updates lockfile)
+      - name: Install dependencies (updates lockfile)
         run: npm install
 
-      - name: Commit & push updated lockfile (rebasing first)
+      - name: Commit updated lockfile
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git fetch origin main
-          git pull origin main --rebase --autostash || true
-
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || echo "No changes"
 
-          git push origin main --force-with-lease
+          git fetch origin main
+          git rebase origin/main || git rebase --abort
+
+          git push origin HEAD:main --force
