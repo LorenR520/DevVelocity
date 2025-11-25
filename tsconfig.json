@@ -13,7 +13,6 @@
     "isolatedModules": true,
     "jsx": "preserve",
 
-    // ⭐ IMPORTANT ADDITIONS
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
