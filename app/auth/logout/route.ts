@@ -1,7 +1,7 @@
+import { supabase } from "../../../lib/supabase";
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
 
 export async function GET() {
   await supabase.auth.signOut();
-  return NextResponse.redirect(new URL("/", process.env.NEXT_PUBLIC_SITE_URL));
+  return NextResponse.redirect("/");
 }
