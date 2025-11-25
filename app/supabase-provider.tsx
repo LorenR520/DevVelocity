@@ -1,16 +1,20 @@
 "use client";
 
 import { createContext, useContext, useState } from "react";
-import { Session, createBrowserSupabaseClient } from "@supabase/auth-helpers-nextjs";
+import { createBrowserClient } from "@supabase/ssr";
 
-const SupabaseContext = createContext(undefined);
+type SupabaseContextType = {
+  supabase: ReturnType<typeof createBrowserClient>;
+};
+
+const SupabaseContext = createContext<SupabaseContextType | undefined>(undefined);
 
 export default function SupabaseProvider({ children }: { children: React.ReactNode }) {
   const [supabase] = useState(() =>
-    createBrowserSupabaseClient({
-      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    })
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
   );
 
   return (
@@ -20,4 +24,10 @@ export default function SupabaseProvider({ children }: { children: React.ReactNo
   );
 }
 
-export const useSupabase = () => useContext(SupabaseContext);
+export function useSupabase() {
+  const ctx = useContext(SupabaseContext);
+  if (!ctx) {
+    throw new Error("useSupabase must be used inside <SupabaseProvider>");
+  }
+  return ctx;
+}
