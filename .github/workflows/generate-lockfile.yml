@@ -16,7 +16,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 🔥 Hard reset — guarantees the workflow always starts clean
       - name: Hard reset to remote main
         run: |
           git fetch origin main
@@ -28,7 +27,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies and generate lockfile
+      - name: Install dependencies (generate package-lock.json)
         run: npm install
 
       - name: Configure git identity
