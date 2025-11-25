@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write    # REQUIRED so github-actions bot can push
+  contents: write
 
 jobs:
   generate:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0   # IMPORTANT to allow rebasing + pulling
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -24,16 +24,17 @@ jobs:
       - name: Install dependencies normally (updates lockfile)
         run: npm install
 
-      - name: Commit updated lockfile
+      - name: Commit & push updated lockfile (force-safe)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          # Pull remote first so push isn't rejected
+          # Pull latest & rebase safely
           git fetch origin main
-          git pull origin main --rebase || true
+          git pull origin main --rebase --autostash || true
 
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || echo "No changes to commit"
 
-          git push origin main
+          # Force-with-lease = safe push (won’t overwrite remote work)
+          git push origin main --force-with-lease
