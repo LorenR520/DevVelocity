@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -18,7 +18,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -42,7 +42,6 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
 
-          {/* Email */}
           <div>
             <label className="block text-sm mb-1">Email</label>
             <input
@@ -54,7 +53,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Password */}
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input
@@ -66,7 +64,6 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Error */}
           {error && (
             <p className="text-red-500 text-sm text-center">{error}</p>
           )}
