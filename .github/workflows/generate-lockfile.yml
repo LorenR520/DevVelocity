@@ -11,7 +11,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0   # IMPORTANT – get entire history
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -29,7 +29,6 @@ jobs:
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || echo "No changes"
 
-          # NEW REQUIRED FIXES:
           git fetch origin main
           git rebase origin/main || git rebase --abort
 
