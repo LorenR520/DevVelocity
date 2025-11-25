@@ -29,7 +29,6 @@ export default function LoginPage() {
       return;
     }
 
-    // Redirect after login
     router.push("/dashboard");
   }
 
