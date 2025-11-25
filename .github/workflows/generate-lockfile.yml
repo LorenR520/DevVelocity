@@ -1,10 +1,10 @@
 name: Generate Correct Lockfile
 
-permissions:
-  contents: write
-
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write    # REQUIRED so github-actions bot can push
 
 jobs:
   generate:
@@ -13,19 +13,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0   # IMPORTANT to allow rebasing + pulling
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install dependencies (updates lockfile)
+      - name: Install dependencies normally (updates lockfile)
         run: npm install
 
       - name: Commit updated lockfile
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
+          # Pull remote first so push isn't rejected
+          git fetch origin main
+          git pull origin main --rebase || true
+
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || echo "No changes to commit"
-          git push
+
+          git push origin main
