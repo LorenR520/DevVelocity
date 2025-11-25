@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write
 
 jobs:
   generate:
@@ -29,15 +30,16 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Pull remote changes (AUTOMATIC merge)
+      - name: Pull main
         run: |
-          git pull origin main --rebase --strategy-option=theirs || true
+          git fetch origin main
+          git pull origin main --rebase || true
 
       - name: Commit updated lockfile
         run: |
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || true
 
-      - name: Push changes (auto-resolve conflicts)
+      - name: Push changes
         run: |
-          git push origin main
+          git push origin main --force
