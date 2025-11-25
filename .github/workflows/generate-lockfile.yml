@@ -29,16 +29,15 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-      - name: Pull remote changes
+      - name: Pull remote changes (AUTOMATIC merge)
         run: |
-          git fetch origin main
-          git pull origin main --rebase || true
+          git pull origin main --rebase --strategy-option=theirs || true
 
       - name: Commit updated lockfile
         run: |
           git add package-lock.json
           git commit -m "Auto-generate synchronized lockfile" || true
 
-      - name: Push changes
+      - name: Push changes (auto-resolve conflicts)
         run: |
-          git push origin main --force
+          git push origin main
