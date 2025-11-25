@@ -1,6 +1,6 @@
 // app/docs/installation/page.tsx
 
-import DocsContent from "../../../components/DocsContent";
+import DocsContent from "@/components/DocsContent";
 
 export const metadata = {
   title: "Installation – DevVelocity Docs",
