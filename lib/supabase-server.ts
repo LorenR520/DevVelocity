@@ -1,5 +1,5 @@
 // lib/supabase-server.ts
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase-browser";
 
 export function getServerClient() {
   return createClient(
