@@ -1,159 +1,110 @@
-// app/docs/providers/oci/page.tsx
+export const dynamic = "force-static";
 
-import DocsContent from "../../../../components/DocsContent";
-
-export const metadata = {
-  title: "OCI Provider – DevVelocity Docs",
-  description:
-    "Deploy optimized DevVelocity images on Oracle Cloud Infrastructure with hardened security, cloud-init automation, and high-performance compute tuning.",
-};
-
-export default function OCIPage() {
+export default function OCIDocs() {
   return (
-    <DocsContent>
-      <h1>Oracle Cloud (OCI) Provider</h1>
+    <div className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-4xl font-bold mb-6">Oracle Cloud Infrastructure Setup</h1>
 
-      <p>
-        DevVelocity provides optimized, production-ready base images for Oracle
-        Cloud Infrastructure (OCI). These images are engineered for high-performance
-        compute, hardened security, and seamless automation through native
-        cloud-init and OCI Instance Configuration workflows.
+      <p className="text-gray-300 mb-10">
+        DevVelocity integrates with Oracle Cloud (OCI) to build, replicate, and manage
+        custom machine images across compartments, tenancies, and regions using secure
+        API keys and IAM policies.
       </p>
 
-      <h2>Supported Regions</h2>
-      <p>DevVelocity images deploy on all major OCI regions, including:</p>
+      {/* SECTION 1 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">
+          1. Create a User for DevVelocity
+        </h2>
+        <p className="text-gray-400 mb-3">
+          Start by creating a dedicated IAM user that DevVelocity will authenticate as:
+        </p>
 
-      <ul>
-        <li>US East (Ashburn)</li>
-        <li>US West (Phoenix)</li>
-        <li>Canada Southeast (Toronto)</li>
-        <li>Germany Central (Frankfurt)</li>
-        <li>UK South (London)</li>
-        <li>Japan Central (Tokyo)</li>
-        <li>India West (Mumbai)</li>
-        <li>Australia East (Sydney)</li>
-        <li>Brazil East (São Paulo)</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`oci iam user create --name devvelocity --description "DevVelocity automation user"`}
+        </pre>
+      </section>
 
-      <h2>Image Features</h2>
-      <p>Every DevVelocity OCI image includes:</p>
+      {/* SECTION 2 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">
+          2. Add User to a Group
+        </h2>
+        <p className="text-gray-400 mb-3">
+          OCI permissions are assigned through groups. Create a group and add the user:
+        </p>
 
-      <ul>
-        <li>Full cloud-init support for automated provisioning</li>
-        <li>Default hardened security profile</li>
-        <li>SSH key–only access (password login disabled)</li>
-        <li>Optimized for Ampere ARM and x86 shapes</li>
-        <li>Firewall defaults using iptables + UFW</li>
-        <li>Fail2ban intrusion detection enabled</li>
-        <li>System/kernel tuning for high-throughput workloads</li>
-        <li>Tuned block volume performance settings</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`oci iam group create --name devvelocity-group --description "Automation group"
 
-      <h2>Deployment Options</h2>
+oci iam group add-user \
+  --group-id <GROUP_OCID> \
+  --user-id <USER_OCID>`}
+        </pre>
+      </section>
 
-      <h3>1. OCI Console</h3>
-      <ol>
-        <li>Go to <strong>Create → Compute Instance</strong></li>
-        <li>Select <strong>Custom Image</strong></li>
-        <li>Choose your imported DevVelocity image</li>
-        <li>Select shape (AMPERE A1, E4, E5, Standard, Dense-IO, etc.)</li>
-        <li>Attach your SSH key</li>
-        <li>Deploy</li>
-      </ol>
+      {/* SECTION 3 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">3. Assign Required Policies</h2>
+        <p className="text-gray-400 mb-3">
+          Allow the group to manage compute images and buckets:
+        </p>
 
-      <h3>2. OCI CLI</h3>
-      <pre>
-        <code>
-{`oci compute instance launch \\
-  --image-id <devvelocity-image-ocid> \\
-  --shape VM.Standard.E5.Flex \\
-  --ocpu-count 2 \\
-  --memory-in-gbs 16 \\
-  --subnet-id <subnet-ocid> \\
-  --assign-public-ip true`}
-        </code>
-      </pre>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`allow group devvelocity-group to manage instance-configurations in tenancy
+allow group devvelocity-group to manage instance-family in tenancy
+allow group devvelocity-group to manage object-family in tenancy`}
+        </pre>
+      </section>
 
-      <h3>3. Terraform</h3>
-      <pre>
-        <code>
-{`resource "oci_core_instance" "devvelocity" {
-  availability_domain = "Uocm:PHX-AD-1"
-  compartment_id      = var.compartment_id
-  shape               = "VM.Standard.E5.Flex"
+      {/* SECTION 4 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">
+          4. Generate an API Signing Key
+        </h2>
+        <p className="text-gray-400 mb-3">
+          DevVelocity authenticates to OCI using a public/private RSA keypair:
+        </p>
 
-  shape_config {
-    ocpus         = 2
-    memory_in_gbs = 16
-  }
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`openssl genrsa -out oci_api_key.pem 2048
+openssl rsa -pubout -in oci_api_key.pem -out oci_api_key_public.pem`}
+        </pre>
 
-  source_details {
-    source_type = "image"
-    image_id    = var.devvelocity_image_ocid
-  }
+        <p className="text-gray-400 mt-3">
+          Upload the public key to the user's API keys in the OCI Console.
+        </p>
+      </section>
 
-  display_name = "devvelocity-oci"
-}`}
-        </code>
-      </pre>
+      {/* SECTION 5 */}
+      <section className="mb-16">
+        <h2 className="text-2xl font-semibold mb-3">
+          5. Connect OCI to DevVelocity
+        </h2>
+        <p className="text-gray-400 mb-3">
+          Finally, configure the provider using your tenancy, region, and user details:
+        </p>
 
-      <h2>Recommended OCI Shapes</h2>
-      <ul>
-        <li>
-          <strong>Ampere A1 ARM</strong> — high-efficiency workloads, APIs,
-          microservices (free tier eligible)
-        </li>
-        <li>
-          <strong>E5 Flex</strong> — balanced x86 production workloads
-        </li>
-        <li>
-          <strong>E4 Flex</strong> — cost-optimized compute
-        </li>
-        <li>
-          <strong>Dense I/O Shapes</strong> — DB, Elasticsearch, Kafka
-        </li>
-        <li>
-          <strong>GPU Shapes</strong> — ML, inference, rendering
-        </li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity configure oci \
+  --tenancy <TENANCY_OCID> \
+  --user <USER_OCID> \
+  --fingerprint <PUBLIC_KEY_FINGERPRINT> \
+  --key-file ./oci_api_key.pem \
+  --region us-ashburn-1`}
+        </pre>
+      </section>
 
-      <h2>Networking Best Practices</h2>
-      <ul>
-        <li>Create a dedicated VCN for production workloads</li>
-        <li>Restrict ingress rules to only required ports</li>
-        <li>Use Network Security Groups for service-level isolation</li>
-        <li>Enable OCI Cloud Guard for threat detection</li>
-        <li>Use Bastion Service for administrative access</li>
-      </ul>
+      {/* FOOTER NAV */}
+      <div className="border-t border-neutral-800 pt-8 flex justify-between text-sm">
+        <a href="/docs/providers/gcp" className="text-gray-400 hover:text-white transition">
+          ← GCP Setup
+        </a>
 
-      <h2>Monitoring & Observability</h2>
-      <p>
-        DevVelocity images integrate cleanly with OCI Observability and
-        Management:
-      </p>
-
-      <ul>
-        <li>OCI Metrics (compute, network, disk)</li>
-        <li>Logging service with journald ingestion</li>
-        <li>Alarm rules and notifications</li>
-        <li>OS Management Service for patch automation</li>
-      </ul>
-
-      <h2>Security Model</h2>
-      <ul>
-        <li>SSH key access only</li>
-        <li>Root login disabled</li>
-        <li>UFW with minimal inbound rules</li>
-        <li>Fail2ban aggressive jail profiles</li>
-        <li>Automatic kernel + package security updates</li>
-      </ul>
-
-      <h2>Next Steps</h2>
-      <p>
-        Once subscribed through your DevVelocity dashboard, OCI images can be
-        imported and deployed instantly using the OCI Console, CLI, or
-        Terraform.
-      </p>
-    </DocsContent>
+        <a href="/docs/providers/linode" className="text-blue-500 hover:underline">
+          Linode Setup →
+        </a>
+      </div>
+    </div>
   );
 }
