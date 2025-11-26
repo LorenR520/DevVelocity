@@ -1,135 +1,104 @@
-// app/docs/providers/linode/page.tsx
+export const dynamic = "force-static";
 
-import DocsContent from "../../../../components/DocsContent";
-
-export const metadata = {
-  title: "Linode Provider – DevVelocity Docs",
-  description:
-    "Deploy optimized DevVelocity images on Linode with cloud-init support, hardened security, and performance tuning for compute, storage, and networking.",
-};
-
-export default function LinodePage() {
+export default function LinodeDocs() {
   return (
-    <DocsContent>
-      <h1>Linode Provider</h1>
+    <div className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-4xl font-bold mb-6">Linode (Akamai Cloud) Setup</h1>
 
-      <p>
-        DevVelocity provides fully optimized, hardened base images for Linode’s
-        compute platform. These images are engineered for predictable
-        performance, robust security, and seamless automation using Linode’s
-        cloud-init integration.
+      <p className="text-gray-300 mb-10">
+        DevVelocity integrates with Linode to build, store, and distribute custom
+        machine images across Linode regions using secure API tokens and upload
+        endpoints.
       </p>
 
-      <h2>Supported Regions</h2>
-      <p>DevVelocity images are deployable in all Linode global data centers:</p>
+      {/* SECTION 1 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">1. Create a Personal Access Token</h2>
+        <p className="text-gray-400 mb-3">
+          DevVelocity authenticates with Linode using a Personal Access Token (PAT).
+          Create one with <strong>Read/Write</strong> permissions for Images, Linodes,
+          and Object Storage.
+        </p>
 
-      <ul>
-        <li>Newark (US)</li>
-        <li>Dallas (US)</li>
-        <li>Atlanta (US)</li>
-        <li>Fremont (US)</li>
-        <li>Toronto (CA)</li>
-        <li>Frankfurt (DE)</li>
-        <li>London (UK)</li>
-        <li>Tokyo (JP)</li>
-        <li>Sydney (AU)</li>
-        <li>Mumbai (IN)</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`Linode Console → Profile → API Tokens → Create Token`}
+        </pre>
+      </section>
 
-      <h2>Image Features</h2>
-      <p>
-        Each DevVelocity Linode image ships with a hardened and performance-tuned
-        baseline optimized for the Linode environment:
-      </p>
+      {/* SECTION 2 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">2. Enable Object Storage</h2>
+        <p className="text-gray-400 mb-3">
+          DevVelocity uses Object Storage to upload raw image artifacts before they
+          are converted into deployable Linode Images.
+        </p>
 
-      <ul>
-        <li>Full cloud-init support via Linode StackScripts</li>
-        <li>Automatic security patches and kernel updates</li>
-        <li>SSH key–only access (password login disabled)</li>
-        <li>Optimized CPU scheduler and disk I/O settings</li>
-        <li>Firewall defaults using UFW</li>
-        <li>Fail2ban preconfigured</li>
-        <li>Systemd tweaks for long-running services</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`linode-cli obj buckets create devvelocity-builds --cluster us-ord-1`}
+        </pre>
+      </section>
 
-      <h2>Deployment Options</h2>
+      {/* SECTION 3 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">
+          3. Confirm Required Permissions
+        </h2>
+        <p className="text-gray-400 mb-3">
+          The token must allow DevVelocity to upload, create, and delete images:
+        </p>
 
-      <h3>1. Linode Cloud Manager</h3>
-      <ol>
-        <li>Go to <strong>Create → Linode</strong></li>
-        <li>Select <strong>Custom Image</strong></li>
-        <li>Choose the DevVelocity image from your Image Library</li>
-        <li>Select a plan (Shared, Dedicated, Premium CPU, or GPU)</li>
-        <li>Deploy in your preferred region</li>
-      </ol>
+        <ul className="list-disc list-inside text-gray-400 space-y-1">
+          <li>Images: Read/Write</li>
+          <li>Object Storage: Read/Write</li>
+          <li>Linodes: Read/Write</li>
+          <li>Account: Read</li>
+        </ul>
+      </section>
 
-      <h3>2. Linode CLI</h3>
-      <pre>
-        <code>
-{`linode-cli linodes create \\
-  --image devvelocity-image \\
-  --region us-east \\
-  --type g6-standard-2 \\
-  --root_pass "CHANGEME"`}
-        </code>
-      </pre>
+      {/* SECTION 4 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">
+          4. Connect Linode to DevVelocity
+        </h2>
+        <p className="text-gray-400 mb-3">
+          Use your token and preferred region (e.g., <code>us-ord</code>):
+        </p>
 
-      <h3>3. Terraform</h3>
-      <pre>
-        <code>
-{`resource "linode_instance" "devvelocity" {
-  label  = "devvelocity-linode"
-  region = "us-east"
-  type   = "g6-standard-2"
-  image  = "devvelocity-image"
-}`}
-        </code>
-      </pre>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity configure linode \
+  --token <LINODE_API_TOKEN> \
+  --region us-ord`}
+        </pre>
+      </section>
 
-      <h2>Recommended Linode Types</h2>
-      <ul>
-        <li><strong>Shared CPU</strong> — low-traffic apps, staging, prototypes</li>
-        <li><strong>Dedicated CPU</strong> — production APIs & microservices</li>
-        <li><strong>Premium CPU</strong> — high-frequency workloads</li>
-        <li><strong>High Memory</strong> — databases, caching, analytics</li>
-        <li><strong>GPU</strong> — ML inference & rendering workloads</li>
-      </ul>
+      {/* SECTION 5 */}
+      <section className="mb-16">
+        <h2 className="text-2xl font-semibold mb-3">5. Launch Your First Linode Image Build</h2>
+        <p className="text-gray-400 mb-3">
+          Trigger a multi-cloud build that includes Linode:
+        </p>
 
-      <h2>Networking Best Practices</h2>
-      <ul>
-        <li>Enable VLANs for private networking and segmentation</li>
-        <li>Use Linode Firewalls to restrict inbound traffic</li>
-        <li>Activate Backups or LKE Node Auto-repair where applicable</li>
-        <li>Use Longview for system analytics</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity build --provider linode`}
+        </pre>
+      </section>
 
-      <h2>Monitoring & Alerting</h2>
-      <p>
-        DevVelocity images work seamlessly with Linode’s built-in observability:
-      </p>
+      {/* FOOTER NAV */}
+      <div className="border-t border-neutral-800 pt-8 flex justify-between text-sm">
+        <a
+          href="/docs/providers/oci"
+          className="text-gray-400 hover:text-white transition"
+        >
+          ← OCI Setup
+        </a>
 
-      <ul>
-        <li>CPU, RAM, disk, and network metrics</li>
-        <li>Longview analytics suite</li>
-        <li>Email & webhook alerting</li>
-        <li>System logs integrated with journald</li>
-      </ul>
-
-      <h2>Security Model</h2>
-      <ul>
-        <li>Root login disabled</li>
-        <li>SSH key authentication only</li>
-        <li>UFW minimal inbound rules</li>
-        <li>Fail2ban with aggressive profiles</li>
-        <li>Kernel and package security updates enabled</li>
-      </ul>
-
-      <h2>Next Steps</h2>
-      <p>
-        You can deploy Linode images directly from the DevVelocity dashboard once
-        subscribed. Enterprise and Professional tiers include monthly image
-        refreshes, security hardening, and priority updates.
-      </p>
-    </DocsContent>
+        <a
+          href="/docs/providers/vultr"
+          className="text-blue-500 hover:underline"
+        >
+          Vultr Setup →
+        </a>
+      </div>
+    </div>
   );
 }
