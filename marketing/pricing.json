@@ -1,0 +1,40 @@
+{
+  "plans": [
+    {
+      "id": "developer",
+      "name": "Developer",
+      "price": 39,
+      "providers": 1,
+      "updates": "monthly",
+      "builder": "basic",
+      "sso": "none"
+    },
+    {
+      "id": "startup",
+      "name": "Startup",
+      "price": 99,
+      "providers": 3,
+      "updates": "weekly",
+      "builder": "advanced",
+      "sso": "basic"
+    },
+    {
+      "id": "team",
+      "name": "Team",
+      "price": 299,
+      "providers": 7,
+      "updates": "daily",
+      "builder": "enterprise",
+      "sso": "advanced"
+    },
+    {
+      "id": "enterprise",
+      "name": "Enterprise",
+      "price": 1250,
+      "providers": "unlimited",
+      "updates": "continuous",
+      "builder": "private",
+      "sso": "gov/enterprise"
+    }
+  ]
+}
