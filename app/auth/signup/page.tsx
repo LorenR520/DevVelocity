@@ -4,7 +4,7 @@ import { useState } from "react";
 import { supabase } from "../../../lib/supabase";
 import { useRouter } from "next/navigation";
 
-export default function SignUpPage() {
+export default function SignupPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
@@ -13,7 +13,7 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleSignUp(e: React.FormEvent) {
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
@@ -37,10 +37,10 @@ export default function SignUpPage() {
       <div className="w-full max-w-md bg-white dark:bg-neutral-900 p-8 rounded-xl shadow-md border dark:border-neutral-800">
 
         <h1 className="text-2xl font-semibold mb-6 text-center">
-          Create Your Account
+          Create Account
         </h1>
 
-        <form onSubmit={handleSignUp} className="flex flex-col gap-4">
+        <form onSubmit={handleSignup} className="flex flex-col gap-4">
 
           <div>
             <label className="block text-sm mb-1">Email</label>
@@ -80,7 +80,7 @@ export default function SignUpPage() {
         <div className="text-center mt-4 text-sm">
           Already have an account?{" "}
           <a href="/auth/login" className="text-blue-600 hover:underline">
-            Login here
+            Log in
           </a>
         </div>
 
