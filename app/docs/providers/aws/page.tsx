@@ -1,4 +1,85 @@
-// app/docs/providers/aws/page.tsx
+export const dynamic = "force-static";
+
+export default function AwsDocs() {
+  return (
+    <div className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-4xl font-bold mb-6">AWS Provider Setup</h1>
+
+      <p className="text-gray-300 mb-10">
+        DevVelocity integrates directly with Amazon Web Services to build,
+        validate, and publish AMIs automatically into your AWS environments.
+      </p>
+
+      {/* SECTION 1 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">1. Create an IAM User</h2>
+        <p className="text-gray-400 mb-3">
+          Create a dedicated IAM user or role for DevVelocity. Assign it the
+          following minimal set of permissions:
+        </p>
+
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`ec2:CreateImage
+ec2:RegisterImage
+ec2:CreateTags
+ec2:CopyImage
+ec2:DescribeImages
+ec2:DescribeInstances`}
+        </pre>
+      </section>
+
+      {/* SECTION 2 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">2. Create an Access Key</h2>
+        <p className="text-gray-400 mb-3">
+          Generate an Access Key for the dedicated DevVelocity IAM user:
+        </p>
+
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`AWS → IAM → Users → Security Credentials → Create Access Key`}
+        </pre>
+      </section>
+
+      {/* SECTION 3 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">3. Connect AWS to DevVelocity</h2>
+        <p className="text-gray-400 mb-3">
+          Authenticate your AWS account inside DevVelocity using:
+        </p>
+
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity configure aws \
+  --access-key <ACCESS_KEY> \
+  --secret-key <SECRET_KEY> \
+  --region us-east-1`}
+        </pre>
+      </section>
+
+      {/* SECTION 4 */}
+      <section className="mb-20">
+        <h2 className="text-2xl font-semibold mb-3">4. Run an AWS Build</h2>
+        <p className="text-gray-400 mb-3">
+          After setup, run your first AWS-specific image build:
+        </p>
+
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity build --provider aws`}
+        </pre>
+      </section>
+
+      {/* FOOTER NAV */}
+      <div className="border-t border-neutral-800 pt-8 flex justify-between text-sm">
+        <a href="/docs/providers" className="text-gray-400 hover:text-white transition">
+          ← All Providers
+        </a>
+
+        <a href="/docs/providers/azure" className="text-blue-500 hover:underline">
+          Azure Setup →
+        </a>
+      </div>
+    </div>
+  );
+}// app/docs/providers/aws/page.tsx
 
 import DocsContent from "../../../../components/DocsContent";
 
