@@ -1,73 +1,65 @@
-// app/docs/installation/page.tsx
+export const dynamic = "force-static";
 
-import DocsContent from "@/components/DocsContent";
-
-export const metadata = {
-  title: "Installation – DevVelocity Docs",
-  description: "How to install and deploy DevVelocity enterprise cloud images.",
-};
-
-export default function InstallationPage() {
+export default function InstallationDocs() {
   return (
-    <DocsContent>
-      <h1>Installation</h1>
+    <div className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-4xl font-bold mb-6">Installation Guide</h1>
 
-      <p>
-        DevVelocity provides enterprise-grade cloud images designed for AWS, Azure,
-        Google Cloud, OCI, Linode, DigitalOcean, and Vultr. This guide walks you
-        through setting up access, deploying your first image, and managing builds.
+      <p className="text-gray-300 mb-10">
+        Start using DevVelocity by configuring your project, connecting your cloud
+        providers, and enabling automated build pipelines.
       </p>
 
-      <h2>1. Create an Account</h2>
-      <p>
-        Before deploying, you&apos;ll need a DevVelocity account. Sign up and choose a
-        subscription tier based on your needs.
-      </p>
+      {/* SECTION 1 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">1. Install DevVelocity CLI</h2>
+        <p className="text-gray-400 mb-3">
+          Install the DevVelocity command-line interface to initialize builds and
+          templates locally:
+        </p>
 
-      <ul>
-        <li>Free – limited testing images</li>
-        <li>Pro – all images + automation tools</li>
-        <li>Enterprise – hardened builds, multi-cloud orchestration</li>
-      </ul>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`npm install -g devvelocity-cli`}
+        </pre>
+      </section>
 
-      <h2>2. Configure Your Cloud Provider</h2>
-      <p>
-        Connect your provider to allow one-click deployment. DevVelocity never stores 
-        your credentials — authentication happens through secure OAuth or API tokens.
-      </p>
+      {/* SECTION 2 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">2. Configure Your Providers</h2>
+        <p className="text-gray-400 mb-3">
+          DevVelocity works across AWS, Azure, GCP, OCI, Linode, DigitalOcean,
+          and Vultr. Provider credentials are stored securely using Key Vaults
+          or external secrets.
+        </p>
 
-      <ol>
-        <li>AWS → IAM Role + Policy</li>
-        <li>Azure → Service Principal</li>
-        <li>GCP → Service Account JSON</li>
-        <li>OCI → Tenancy + API Key</li>
-      </ol>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity configure`}
+        </pre>
+      </section>
 
-      <h2>3. Deploy Your First Image</h2>
-      <p>
-        After connection, navigate to <strong>Providers</strong> and choose your cloud.
-      </p>
+      {/* SECTION 3 */}
+      <section className="mb-12">
+        <h2 className="text-2xl font-semibold mb-3">3. Initialize a Template</h2>
+        <p className="text-gray-400 mb-3">
+          Templates define how images are built, signed, and validated.
+        </p>
 
-      <pre>
-        <code>
-{`# Example: Deploying AWS Image
-1. Select Provider → AWS
-2. Choose Enterprise AMI
-3. Click “Deploy”
-4. Confirm region and instance type
-`}
-        </code>
-      </pre>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity template init --provider aws`}
+        </pre>
+      </section>
 
-      <h2>4. What Happens Next?</h2>
-      <p>
-        DevVelocity provisions, configures, and hardens your environment automatically
-        using enterprise security best practices.
-      </p>
+      {/* SECTION 4 */}
+      <section>
+        <h2 className="text-2xl font-semibold mb-3">4. Launch Your First Build</h2>
+        <p className="text-gray-400 mb-3">
+          Once configured, trigger your first automated multi-cloud build:
+        </p>
 
-      <p>
-        You can track build status in your <strong>Dashboard</strong>.
-      </p>
-    </DocsContent>
+        <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
+{`devvelocity build --all-providers`}
+        </pre>
+      </section>
+    </div>
   );
 }
