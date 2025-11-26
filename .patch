@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Loren Rivas <you@example.com>
+Date: Wed, 27 Nov 2025 00:00:00 -0500
+Subject: Fix Supabase integration (browser + server), clean imports, remove
+ circular refs, Cloudflare-ready
+
+---
+ lib/supabase-browser.ts | 28 ++++++++++++++++++++++++++++
+ lib/supabase-server.ts  | 34 +++++++++++++++++++++++++++++++++
+ app/auth/logout/route.ts | 11 ++++++-----
+ 3 files changed, 68 insertions(+), 5 deletions(-)
+
+diff --git a/lib/supabase-browser.ts b/lib/supabase-browser.ts
+new file mode 100644
+index 0000000..bbbbbbb
+--- /dev/null
++++ b/lib/supabase-browser.ts
+@@ -0,0 +1,28 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++// Browser-side client (no SSR, no cookies)
++let browserClient = null as ReturnType<typeof createClient> | null;
++
++export function getBrowserClient() {
++  if (!browserClient) {
++    browserClient = createClient(
++      process.env.NEXT_PUBLIC_SUPABASE_URL!,
++      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
++    );
++  }
++
++  return browserClient;
++}
++
++export const supabaseBrowser = {
++  getClient: getBrowserClient,
++};
+diff --git a/lib/supabase-server.ts b/lib/supabase-server.ts
+new file mode 100644
+index 0000000..ccccccc
+--- /dev/null
++++ b/lib/supabase-server.ts
+@@ -0,0 +1,34 @@
++import { cookies } from "next/headers";
++import { createServerClient } from "@supabase/ssr";
++
++/**
++ * Server-side Supabase client
++ * Used in route handlers, server components, SSR rendering
++ * Compatible with Cloudflare Pages
++ */
++export function getServerClient() {
++  return createServerClient(
++    process.env.NEXT_PUBLIC_SUPABASE_URL!,
++    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++    {
++      cookies: {
++        get(name: string) {
++          return cookies().get(name)?.value;
++        },
++        set() {
++          // Cloudflare doesn't support setting HTTP cookies in SSR
++        },
++        remove() {
++          // Same as above — no-op
++        },
++      },
++    }
++  );
++}
++
++export const supabaseServer = {
++  getClient: getServerClient,
++};
+diff --git a/app/auth/logout/route.ts b/app/auth/logout/route.ts
+index aaaaaaa..ddddddd 100644
+--- a/app/auth/logout/route.ts
++++ b/app/auth/logout/route.ts
+@@ -1,10 +1,11 @@
+-import { NextResponse } from "next/server";
+-import { supabase } from "@/lib/supabase-server";
++import { NextResponse } from "next/server";
++import { getServerClient } from "@/lib/supabase-server";
+
+ export const dynamic = "force-dynamic"; // Required
+
+ export async function GET() {
+-  await supabase.auth.signOut();
+-  return NextResponse.redirect("/");
++  const supabase = getServerClient();
++  await supabase.auth.signOut();
++
++  return NextResponse.redirect("/");
+ }
