@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+     "dev": "next dev",
+     "build": "next-on-pages",
+     "start": "next start"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.45.0",
