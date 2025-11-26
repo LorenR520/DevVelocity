@@ -1,135 +1,119 @@
+// docs/pricing/page.tsx
+
+export const dynamic = "force-static"; // Required for Cloudflare Pages
+
 export const metadata = {
   title: "Pricing – DevVelocity",
-  description: "Choose the right DevVelocity plan for your cloud automation needs.",
+  description:
+    "Choose the right DevVelocity plan for fully automated multi-cloud image builds powered by autonomous, self-updating infrastructure intelligence.",
 };
 
 export default function PricingPage() {
-  const tiers = [
-    {
-      name: "Free",
-      price: "$0",
-      period: "/month",
-      description: "Perfect for hobbyists, students, and testing environments.",
-      features: [
-        "Access to basic documentation",
-        "Community support",
-        "Single-cloud quickstart images (limited)",
-        "Manual deployments only",
-      ],
-      cta: {
-        label: "Start Free",
-        href: "/auth/signup",
-      },
-      highlighted: false,
-    },
-    {
-      name: "Pro",
-      price: "$29",
-      period: "/month",
-      description: "For professionals who need automated multi-cloud environments.",
-      features: [
-        "All Free features",
-        "Enterprise-grade cloud images",
-        "Multi-cloud deployments (AWS, Azure, GCP, DO, Linode, OCI, Vultr)",
-        "Automated hardened builds",
-        "Versioned image history",
-        "Priority processing",
-      ],
-      cta: {
-        label: "Upgrade to Pro",
-        href: "/billing",
-      },
-      highlighted: true,
-    },
-    {
-      name: "Enterprise",
-      price: "Custom",
-      period: "",
-      description: "For teams requiring compliance, SLAs, and private cloud delivery.",
-      features: [
-        "Everything in Pro",
-        "Private registry delivery",
-        "Bulk licensing",
-        "SOC2 / HIPAA compliant pipelines",
-        "Team-level dashboard",
-        "Dedicated infrastructure lanes",
-      ],
-      cta: {
-        label: "Contact Sales",
-        href: "mailto:sales@devvelocity.io",
-      },
-      highlighted: false,
-    },
-  ];
-
   return (
-    <div className="max-w-6xl mx-auto py-16 px-6">
-      <h1 className="text-4xl font-bold text-center mb-6">
-        Simple, transparent pricing
-      </h1>
-      <p className="text-center text-gray-600 dark:text-gray-300 max-w-xl mx-auto mb-16">
-        Scale from hobby projects to enterprise-grade cloud automation. No hidden fees,
-        ever.
+    <main className="max-w-6xl mx-auto px-6 py-20 text-white">
+      <h1 className="text-4xl font-bold mb-6 text-center">Pricing</h1>
+      <p className="text-gray-300 text-center mb-12">
+        DevVelocity is a fully autonomous cloud engineer. No support calls, no
+        maintenance — just continuous, self-updating automation.
       </p>
 
-      {/* PRICING GRID */}
       <div className="grid md:grid-cols-3 gap-8">
-        {tiers.map((tier, idx) => (
-          <div
-            key={idx}
-            className={`
-              border rounded-xl p-8 shadow-sm dark:border-neutral-800 
-              bg-white dark:bg-neutral-900 flex flex-col
-              ${tier.highlighted ? "border-blue-600 shadow-lg" : ""}
-            `}
+
+        {/* DEVELOPER */}
+        <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800">
+          <h2 className="text-2xl font-semibold mb-2">Developer</h2>
+          <p className="text-gray-400 mb-4">For solo builders & hobby engineers</p>
+
+          <p className="text-4xl font-bold mb-6">$39</p>
+
+          <ul className="space-y-2 text-gray-300 mb-6">
+            <li>✔ 1 Cloud Provider</li>
+            <li>✔ Monthly Auto-Updates</li>
+            <li>✔ Template Builder (Basic)</li>
+            <li>✔ Auto-Scraped Provider Docs</li>
+            <li>✔ CLI Access</li>
+          </ul>
+
+          <a
+            href="/auth/signup"
+            className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
           >
-            <h2 className="text-2xl font-bold mb-2">{tier.name}</h2>
+            Start Building
+          </a>
+        </div>
 
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              {tier.description}
-            </p>
+        {/* STARTUP */}
+        <div className="p-6 bg-neutral-900 rounded-xl border border-blue-700 shadow-blue-700/40 shadow-lg">
+          <h2 className="text-2xl font-semibold mb-2">Startup</h2>
+          <p className="text-gray-400 mb-4">For fast-moving teams & SMBs</p>
 
-            <div className="text-4xl font-bold mb-6">
-              {tier.price}
-              <span className="text-lg font-medium text-gray-500">
-                {tier.period}
-              </span>
-            </div>
+          <p className="text-4xl font-bold mb-6">$99</p>
 
-            {/* FEATURES */}
-            <ul className="space-y-2 mb-8 flex-1">
-              {tier.features.map((f, i) => (
-                <li
-                  key={i}
-                  className="text-sm text-gray-700 dark:text-gray-300 flex items-start"
-                >
-                  <span className="text-blue-600 mr-2">✓</span> {f}
-                </li>
-              ))}
-            </ul>
+          <ul className="space-y-2 text-gray-300 mb-6">
+            <li>✔ 3 Cloud Providers</li>
+            <li>✔ Weekly Auto-Updates</li>
+            <li>✔ Template Builder (Advanced)</li>
+            <li>✔ Auto-Scraped Provider Docs</li>
+            <li>✔ Team Workspace</li>
+            <li>✔ Basic SSO</li>
+          </ul>
 
-            {/* CTA */}
-            <a
-              href={tier.cta.href}
-              className={`
-                block text-center w-full px-4 py-3 rounded-md font-medium transition
-                ${
-                  tier.highlighted
-                    ? "bg-blue-600 text-white hover:bg-blue-700"
-                    : "border border-gray-300 dark:border-neutral-700 hover:bg-gray-100 dark:hover:bg-neutral-800 text-gray-700 dark:text-gray-300"
-                }
-              `}
-            >
-              {tier.cta.label}
-            </a>
-          </div>
-        ))}
+          <a
+            href="/auth/signup"
+            className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+          >
+            Start Startup Plan
+          </a>
+        </div>
+
+        {/* TEAM */}
+        <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800">
+          <h2 className="text-2xl font-semibold mb-2">Team</h2>
+          <p className="text-gray-400 mb-4">For multi-cloud operational teams</p>
+
+          <p className="text-4xl font-bold mb-6">$299</p>
+
+          <ul className="space-y-2 text-gray-300 mb-6">
+            <li>✔ 7 Cloud Providers</li>
+            <li>✔ Daily Auto-Updates</li>
+            <li>✔ Enterprise Template Library</li>
+            <li>✔ Auto-Scraped Provider Docs + Pipelines</li>
+            <li>✔ SSO + Role Management</li>
+            <li>✔ Build Concurrency & Webhooks</li>
+          </ul>
+
+          <a
+            href="/auth/signup"
+            className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+          >
+            Start Team Plan
+          </a>
+        </div>
+
+        {/* ENTERPRISE */}
+        <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800 md:col-span-3">
+          <h2 className="text-2xl font-semibold mb-2">Enterprise</h2>
+          <p className="text-gray-400 mb-4">Autonomous infrastructure at scale</p>
+
+          <p className="text-4xl font-bold mb-6">Starting at $1,250/mo</p>
+
+          <ul className="space-y-2 text-gray-300 mb-6 md:max-w-lg">
+            <li>✔ Unlimited Cloud Providers</li>
+            <li>✔ Real-Time Auto-Updates (Continuous)</li>
+            <li>✔ Private Templates & Pipelines</li>
+            <li>✔ Compliance Mode + SBOM</li>
+            <li>✔ Multi-Region Build Network</li>
+            <li>✔ On-Prem / GovCloud Optional</li>
+          </ul>
+
+          <a
+            href="mailto:sales@devvelocity.app"
+            className="inline-block px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-md"
+          >
+            Contact Sales
+          </a>
+        </div>
       </div>
-
-      {/* FOOTNOTE */}
-      <p className="text-center text-gray-500 dark:text-gray-400 mt-12 text-sm">
-        All subscriptions can be canceled anytime. No long-term contracts.
-      </p>
-    </div>
+    </main>
   );
 }
