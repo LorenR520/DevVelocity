@@ -27,7 +27,7 @@ export default function InstallationDocs() {
       <section className="mb-12">
         <h2 className="text-2xl font-semibold mb-3">2. Configure Your Providers</h2>
         <p className="text-gray-400 mb-3">
-          DevVelocity works across AWS, Azure, GCP, OCI, Linode, DigitalOcean,
+          DevVelocity works across AWS, Azure, GCP, OCI, Linode, DigitalOcean
           and Vultr. Provider credentials are stored securely using Key Vaults
           or external secrets.
         </p>
@@ -41,7 +41,7 @@ export default function InstallationDocs() {
       <section className="mb-12">
         <h2 className="text-2xl font-semibold mb-3">3. Initialize a Template</h2>
         <p className="text-gray-400 mb-3">
-          Templates define how images are built, signed, and validated.
+          Templates define how images are built, validated, and signed.
         </p>
 
         <pre className="bg-black/60 border border-neutral-800 p-4 rounded-lg text-sm overflow-x-auto">
@@ -50,7 +50,7 @@ export default function InstallationDocs() {
       </section>
 
       {/* SECTION 4 */}
-      <section>
+      <section className="mb-20">
         <h2 className="text-2xl font-semibold mb-3">4. Launch Your First Build</h2>
         <p className="text-gray-400 mb-3">
           Once configured, trigger your first automated multi-cloud build:
@@ -60,6 +60,17 @@ export default function InstallationDocs() {
 {`devvelocity build --all-providers`}
         </pre>
       </section>
+
+      {/* FOOTER NAV */}
+      <div className="border-t border-neutral-800 pt-8 flex justify-between text-sm">
+        <a href="/docs" className="text-gray-400 hover:text-white transition">
+          ← Back to Docs
+        </a>
+
+        <a href="/docs/usage" className="text-blue-500 hover:underline">
+          Continue to Usage →
+        </a>
+      </div>
     </div>
   );
 }
