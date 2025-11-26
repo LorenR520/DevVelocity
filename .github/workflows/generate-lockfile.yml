@@ -11,39 +11,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Always start from a clean and correct main branch
-      - name: Checkout full history
-        uses: actions/checkout@v3
+      # 1. Checkout full repo
+      - name: Checkout main branch
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
 
-      - name: Reset to remote main (clean state)
+      # 2. Ensure we exactly match remote main
+      - name: Reset to clean remote main
         run: |
           git fetch origin main
           git checkout main
           git reset --hard origin/main
 
+      # 3. Setup Node (Cloudflare uses Node 22)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: "npm"
 
-      # This will generate a fresh package-lock.json
-      - name: Install dependencies
+      # 4. Install & regenerate lockfile
+      - name: Generate lockfile
         run: npm install
 
+      # 5. Configure Git identity for GH Actions
       - name: Configure Git identity
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-      # Add and commit lockfile
+      # 6. Commit lockfile ONLY if changed
       - name: Commit lockfile
         run: |
           git add package-lock.json
-          git commit -m "Auto-generate synchronized lockfile" || echo "No changes to commit"
+          git diff --quiet && echo "No changes detected." || git commit -m "Regenerate package-lock.json"
 
-      # Push using correct token + correct branch
-      - name: Push updated lockfile
+      # 7. Push back to main
+      - name: Push changes
+        if: success()
         run: |
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} main --force
+          git push
