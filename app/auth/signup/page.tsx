@@ -1,8 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "../../../lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+
+// Client-safe Supabase instance (never runs at build time)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function SignupPage() {
   const router = useRouter();
@@ -37,7 +43,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md bg-white dark:bg-neutral-900 p-8 rounded-xl shadow-md border dark:border-neutral-800">
 
         <h1 className="text-2xl font-semibold mb-6 text-center">
-          Create Account
+          Create Your Account
         </h1>
 
         <form onSubmit={handleSignup} className="flex flex-col gap-4">
@@ -73,14 +79,14 @@ export default function SignupPage() {
             disabled={loading}
             className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition"
           >
-            {loading ? "Creating account..." : "Sign Up"}
+            {loading ? "Creating Account..." : "Sign Up"}
           </button>
         </form>
 
         <div className="text-center mt-4 text-sm">
           Already have an account?{" "}
           <a href="/auth/login" className="text-blue-600 hover:underline">
-            Log in
+            Login
           </a>
         </div>
 
