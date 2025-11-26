@@ -66,6 +66,56 @@ export default function Home() {
         </div>
       </section>
 
+      {/* HOMEPAGE PRICING SECTION */}
+      <section className="max-w-6xl mx-auto px-6 pb-24 mt-10 md:mt-20">
+        <h2 className="text-3xl font-semibold mb-10 text-center">
+          Simple, Predictable Pricing
+        </h2>
+
+        <div className="grid md:grid-cols-3 gap-8 text-white">
+
+          {/* DEVELOPER */}
+          <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800">
+            <h3 className="text-xl font-semibold mb-2">Developer</h3>
+            <p className="text-3xl font-bold mb-4">$39</p>
+            <p className="text-gray-400 mb-4">For individuals & hobbyists</p>
+            <a
+              href="/pricing"
+              className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+            >
+              View Pricing
+            </a>
+          </div>
+
+          {/* STARTUP */}
+          <div className="p-6 bg-neutral-900 rounded-xl border border-blue-700 shadow-blue-700/40 shadow-lg">
+            <h3 className="text-xl font-semibold mb-2">Startup</h3>
+            <p className="text-3xl font-bold mb-4">$99</p>
+            <p className="text-gray-400 mb-4">For fast-growing teams</p>
+            <a
+              href="/pricing"
+              className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+            >
+              See Plans
+            </a>
+          </div>
+
+          {/* TEAM */}
+          <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800">
+            <h3 className="text-xl font-semibold mb-2">Team</h3>
+            <p className="text-3xl font-bold mb-4">$299</p>
+            <p className="text-gray-400 mb-4">For multi-cloud teams</p>
+            <a
+              href="/pricing"
+              className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+            >
+              Explore Plans
+            </a>
+          </div>
+
+        </div>
+      </section>
+
     </main>
   );
 }
