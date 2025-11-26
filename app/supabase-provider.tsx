@@ -1,7 +1,7 @@
 "use client";
 
-import { createClient } from "@supabase/ssr";
 import { createContext, useContext, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 const SupabaseContext = createContext<any>(null);
 
