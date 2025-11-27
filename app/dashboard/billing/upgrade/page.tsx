@@ -1,19 +1,15 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-
-const PLANS = {
-  developer: { price: "$39/mo", name: "Developer" },
-  startup: { price: "$99/mo", name: "Startup" },
-  team: { price: "$299/mo", name: "Team" },
-  enterprise: { price: "Custom", name: "Enterprise" },
-};
+import pricingData from "../../../../marketing/pricing.json";
 
 export default function UpgradePlanPage() {
   const params = useSearchParams();
-  const plan = params.get("plan") as keyof typeof PLANS;
+  const planId = params.get("plan");
 
-  if (!plan || !PLANS[plan]) {
+  const plan = pricingData.plans.find((p) => p.id === planId);
+
+  if (!plan) {
     return (
       <div className="text-white text-center py-20">
         <h1 className="text-3xl font-bold">Invalid Plan</h1>
@@ -22,19 +18,23 @@ export default function UpgradePlanPage() {
     );
   }
 
-  const p = PLANS[plan];
-
   return (
     <section className="max-w-xl mx-auto px-6 py-20 text-white">
-      <h1 className="text-3xl font-bold mb-6">
-        Upgrade to {p.name}
-      </h1>
+      <h1 className="text-3xl font-bold mb-6">Upgrade to {plan.name}</h1>
 
       <p className="text-gray-300 mb-6">
-        You're upgrading to the <strong>{p.name}</strong> plan.
+        Providers: <strong>{plan.providers}</strong>
+        <br />
+        Updates: <strong>{plan.updates}</strong>
+        <br />
+        Builder: <strong>{plan.builder}</strong>
+        <br />
+        SSO Level: <strong>{plan.sso}</strong>
       </p>
 
-      <p className="text-4xl font-bold mb-10">{p.price}</p>
+      <p className="text-4xl font-bold mb-10">
+        {plan.id === "enterprise" ? "Custom" : `$${plan.price}/mo`}
+      </p>
 
       <button className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-md text-white">
         Continue to Checkout
