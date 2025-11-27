@@ -9,18 +9,15 @@ export default function UsagePage() {
 
       <BillingUsageChart />
 
-      <div className="mt-8 bg-neutral-900 rounded-xl border border-neutral-800 p-6">
-        <h2 className="text-xl font-semibold mb-2">Overage Policy</h2>
-        <p className="text-gray-400 text-sm">
-          Additional usage beyond plan limits is billed monthly at:
-        </p>
+      <section className="mt-10 bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+        <h2 className="text-xl font-semibold mb-3">Overage Pricing</h2>
 
-        <ul className="mt-4 text-gray-300 text-sm">
-          <li>• $0.02 per build minute overage</li>
-          <li>• $0.15 per extra pipeline executed</li>
-          <li>• $0.0001 per API call overage</li>
+        <ul className="text-gray-300 text-sm space-y-1">
+          <li>• $0.02 per build minute over 1,000</li>
+          <li>• $0.15 per pipeline executed over 200</li>
+          <li>• $0.0001 per API call over 50,000</li>
         </ul>
-      </div>
+      </section>
     </main>
   );
 }
