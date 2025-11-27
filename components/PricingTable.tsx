@@ -1,48 +1,27 @@
-// components/PricingTable.tsx
+import Link from "next/link";
 
-interface Plan {
-  name: string;
-  price: string;
-  badge?: string;
-  features: string[];
-  cta: string;
-  href: string;
-}
-
-export default function PricingTable({ plans }: { plans: Plan[] }) {
+export default function PricingTable({ plan }: any) {
   return (
-    <div className="grid md:grid-cols-3 gap-8 text-white">
-      {plans.map((plan) => (
-        <div
-          key={plan.name}
-          className={`p-6 rounded-xl border ${
-            plan.badge ? "border-blue-700 shadow-blue-700/40 shadow-lg" : "border-neutral-800"
-          } bg-neutral-900`}
-        >
-          {plan.badge && (
-            <span className="inline-block mb-3 text-xs px-2 py-0.5 bg-blue-700/40 text-blue-300 rounded-full">
-              {plan.badge}
-            </span>
-          )}
+    <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-xl">
+      <h3 className="text-xl font-semibold mb-2">{plan.name}</h3>
 
-          <h2 className="text-2xl font-semibold mb-2">{plan.name}</h2>
+      <p className="text-3xl font-bold mb-4">
+        {plan.price === "custom" ? "Custom" : `$${plan.price}`}
+      </p>
 
-          <p className="text-4xl font-bold mb-6">{plan.price}</p>
+      <ul className="space-y-1 text-gray-400 text-sm mb-6">
+        <li>✔ {plan.providers} Cloud Providers</li>
+        <li>✔ {plan.updates} Auto-Updates</li>
+        <li>✔ Template Builder: {plan.builder}</li>
+        <li>✔ SSO Level: {plan.sso}</li>
+      </ul>
 
-          <ul className="space-y-2 text-gray-300 mb-6">
-            {plan.features.map((f, i) => (
-              <li key={i}>✔ {f}</li>
-            ))}
-          </ul>
-
-          <a
-            href={plan.href}
-            className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
-          >
-            {plan.cta}
-          </a>
-        </div>
-      ))}
+      <Link
+        href={`/dashboard/billing/upgrade?plan=${plan.id}`}
+        className="block w-full text-center py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+      >
+        Select Plan
+      </Link>
     </div>
   );
 }
