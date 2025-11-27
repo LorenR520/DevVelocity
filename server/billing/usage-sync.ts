@@ -8,77 +8,76 @@ export async function syncUsage(env: any) {
 
   console.log("🔄 Running usage meter sync...");
 
-  // Get all organizations with a plan
-  const { data: orgs } = await supabase.from("organizations").select("*");
+  // Fetch all orgs
+  const { data: orgs, error: orgErr } = await supabase
+    .from("organizations")
+    .select("*");
 
-  if (!orgs) return;
+  if (orgErr || !orgs) {
+    console.error("Failed to load organizations:", orgErr);
+    return;
+  }
 
   for (const org of orgs) {
-    const plan = (pricing as any).plans.find((p:any) => p.id === org.plan_id);
+    const plan = pricing.plans.find((p) => p.id === org.plan_id);
 
     if (!plan) continue;
 
-    // Fetch usage in the last billing cycle
-    const { data: usage } = await supabase
+    const { data: usage, error: usageErr } = await supabase
       .from("usage_logs")
       .select("*")
       .eq("org_id", org.id)
       .gte("date", org.current_cycle_start);
 
-    const totalBuildMinutes = usage?.reduce(
-      (sum: number, log: any) => sum + log.build_minutes,
-      0
-    ) ?? 0;
-
-    const totalPipelines = usage?.reduce(
-      (sum: number, log: any) => sum + log.pipelines_run,
-      0
-    ) ?? 0;
-
-    const totalApiCalls = usage?.reduce(
-      (sum: number, log: any) => sum + log.provider_api_calls,
-      0
-    ) ?? 0;
-
-    // Compare usage to plan limits
-    const overBuildMinutes = Math.max(0, totalBuildMinutes - 1000);
-    const overPipelines = Math.max(0, totalPipelines - 200);
-    const overApiCalls = Math.max(0, totalApiCalls - 50000);
-
-    // If nothing exceeded → skip
-    if (overBuildMinutes === 0 && overPipelines === 0 && overApiCalls === 0)
+    if (usageErr) {
+      console.error("Error fetching usage:", usageErr);
       continue;
+    }
 
-    // Calculate charges
-    const buildCharge = overBuildMinutes * 0.02;
+    const totalBuildMinutes =
+      usage?.reduce((sum, u) => sum + u.build_minutes, 0) ?? 0;
+
+    const totalPipelines =
+      usage?.reduce((sum, u) => sum + u.pipelines_run, 0) ?? 0;
+
+    const totalApiCalls =
+      usage?.reduce((sum, u) => sum + u.provider_api_calls, 0) ?? 0;
+
+    // Hard-coded limits (you can move to pricing.json later)
+    const overBuild = Math.max(0, totalBuildMinutes - 1000);
+    const overPipelines = Math.max(0, totalPipelines - 200);
+    const overApi = Math.max(0, totalApiCalls - 50000);
+
+    if (overBuild === 0 && overPipelines === 0 && overApi === 0) continue;
+
+    const buildCharge = overBuild * 0.02;
     const pipelineCharge = overPipelines * 0.15;
-    const apiCharge = overApiCalls * 0.0001;
+    const apiCharge = overApi * 0.0001;
 
-    const totalCharge = buildCharge + pipelineCharge + apiCharge;
+    const amount = buildCharge + pipelineCharge + apiCharge;
 
-    // Record overage event
     await supabase.from("billing_events").insert({
       org_id: org.id,
       type: "usage_overage",
-      amount: totalCharge,
+      amount,
       details: {
-        overBuildMinutes,
-        overPipelines,
-        overApiCalls,
+        over_build_minutes: overBuild,
+        over_pipelines: overPipelines,
+        over_api_calls: overApi,
+        total_build_minutes: totalBuildMinutes,
+        total_pipelines: totalPipelines,
+        total_api_calls: totalApiCalls,
       },
     });
 
-    console.log(`⚠️ Usage Overages Found for ${org.id} → $${totalCharge}`);
-
-    // Add to org billing queue
     await supabase
       .from("organizations")
       .update({
         pending_overage_amount:
-          (org.pending_overage_amount ?? 0) + totalCharge,
+          (org.pending_overage_amount ?? 0) + amount,
       })
       .eq("id", org.id);
   }
 
-  console.log("✅ Usage sync complete");
+  console.log("✅ Usage sync completed");
 }
