@@ -1,12 +1,14 @@
 // app/api/billing/stripe/route.ts
 
-import Stripe from "stripe";
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
-  const body = await req.text();
-  const sig = req.headers.get("stripe-signature")!;
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+  const sig = req.headers.get("stripe-signature")!;
+  const body = await req.text();
 
   let event;
 
@@ -20,7 +22,44 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message }, { status: 400 });
   }
 
-  console.log("⚡ Stripe webhook:", event.type);
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
-  return NextResponse.json({ ok: true });
+  /// -------------------------
+  /// Process subscription updates
+  /// -------------------------
+  if (
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const sub = event.data.object as Stripe.Subscription;
+
+    const userId = sub.customer_details?.metadata?.userId
+      || (sub.customer as any)?.metadata?.userId;
+
+    if (!userId) {
+      console.log("🚨 No Supabase user linked to subscription");
+      return NextResponse.json({ ok: true });
+    }
+
+    const priceId = sub.items.data[0].price.id;
+    const status = sub.status;
+    const renews = new Date(sub.current_period_end * 1000).toISOString();
+
+    await supabase.auth.admin.updateUserById(userId, {
+      app_metadata: {
+        billing_provider: "stripe",
+        plan: priceId,
+        status,
+        renews_at: renews
+      }
+    });
+
+    return NextResponse.json({ received: true });
+  }
+
+  return NextResponse.json({ received: true });
 }
