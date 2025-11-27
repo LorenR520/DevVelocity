@@ -2,6 +2,7 @@
 
 import { updateUserBillingFromLemon } from "../../server/billing/lemon-sync";
 import { updateUserBillingFromStripe } from "../../server/billing/stripe-sync";
+import { billSeatOverages } from "@/server/billing/seats-bill";
 
 export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
@@ -13,6 +14,7 @@ export default {
 
     // Sync Stripe subscriptions
     await updateUserBillingFromStripe(env);
+    await billSeatOverages(env);
 
     console.log("✅ Billing sync completed");
   }
