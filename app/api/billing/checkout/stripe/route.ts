@@ -2,96 +2,69 @@
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { plan, orgId } = await req.json();
+    const body = await req.json();
+    const { planId, orgId, email } = body;
 
-    if (!plan || !orgId) {
+    if (!planId || !orgId || !email) {
       return NextResponse.json(
-        { error: "Missing plan or orgId" },
+        { error: "Missing planId, orgId, or email" },
         { status: 400 }
       );
     }
 
-    // -----------------------------------
-    //  Initialize Stripe + Supabase Admin
-    // -----------------------------------
+    // Map planId → Stripe Price IDs
+    const priceMap: Record<string, string> = {
+      developer: process.env.STRIPE_PRICE_DEVELOPER!,
+      startup: process.env.STRIPE_PRICE_STARTUP!,
+      team: process.env.STRIPE_PRICE_TEAM!,
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE!, // 1250+ custom
+    };
+
+    const price = priceMap[planId];
+    if (!price) {
+      return NextResponse.json(
+        { error: "Invalid planId" },
+        { status: 400 }
+      );
+    }
+
+    // Initialize Stripe
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // -----------------------------------
-    //          Get User
-    // -----------------------------------
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // Enterprise requires custom contact flow
+    if (planId === "enterprise") {
+      const contactUrl = `${process.env.APP_URL}/contact-sales?org=${orgId}`;
+      return NextResponse.json({
+        url: contactUrl,
+        message: "Enterprise plan requires a custom sales agreement.",
+      });
     }
 
-    // -----------------------------------
-    //      Plan → Stripe Price Mapping
-    // -----------------------------------
-    const priceMap: Record<string, string | undefined> = {
-      developer: process.env.STRIPE_PRICE_DEVELOPER,
-      startup: process.env.STRIPE_PRICE_STARTUP,
-      team: process.env.STRIPE_PRICE_TEAM,
-      enterprise: process.env.STRIPE_PRICE_ENTERPRISE,
-    };
-
-    const stripePrice = priceMap[plan];
-
-    if (!stripePrice) {
-      return NextResponse.json(
-        { error: `Missing Stripe price for plan '${plan}'` },
-        { status: 400 }
-      );
-    }
-
-    // -----------------------------------
-    //      Create Stripe Checkout
-    // -----------------------------------
+    // Create checkout session
     const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
       mode: "subscription",
-
-      line_items: [{ price: stripePrice, quantity: 1 }],
-
-      // Needed for automatic linking
-      metadata: {
-        userId: user.id,
-        orgId,
-        plan,
-        provider: "stripe",
-      },
-
-      subscription_data: {
-        metadata: {
-          userId: user.id,
-          orgId,
-          plan,
+      customer_email: email,
+      line_items: [
+        {
+          price,
+          quantity: 1,
         },
+      ],
+      metadata: {
+        orgId,
+        planId,
       },
-
-      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.APP_URL}/dashboard/billing?cancelled=1`,
-      automatic_tax: { enabled: true },
-
-      customer_creation: "always",
+      success_url: `${process.env.APP_URL}/dashboard/billing?status=success`,
+      cancel_url: `${process.env.APP_URL}/dashboard/billing?status=cancel`,
     });
 
-    return NextResponse.json({
-      url: session.url,
-      sessionId: session.id,
-    });
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
     return NextResponse.json(
