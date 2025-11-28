@@ -1,115 +1,86 @@
-// app/api/billing/checkout/lemon/route.ts
-
 import { NextResponse } from "next/server";
-import pricing from "@/marketing/pricing.json";
 import { createClient } from "@supabase/supabase-js";
-
-export const config = {
-  runtime: "edge",
-};
 
 export async function POST(req: Request) {
   try {
-    const { plan, orgId } = await req.json();
+    const { plan } = await req.json();
 
-    if (!plan || !orgId) {
+    if (!plan) {
       return NextResponse.json(
-        { error: "Missing plan or orgId" },
+        { error: "Missing plan" },
         { status: 400 }
       );
     }
 
-    // Validate plan exists in pricing.json
-    const planMeta = pricing.plans.find((p) => p.id === plan);
-    if (!planMeta) {
-      return NextResponse.json(
-        { error: "Invalid plan" },
-        { status: 400 }
-      );
-    }
-
-    // Map plan → Lemon variant ID
-    const lemonVariantKey = {
-      developer: "LEMON_VARIANT_DEVELOPER",
-      startup: "LEMON_VARIANT_STARTUP",
-      team: "LEMON_VARIANT_TEAM",
-      enterprise: "LEMON_VARIANT_ENTERPRISE",
-    }[plan];
-
-    if (!lemonVariantKey) {
-      return NextResponse.json(
-        { error: "Invalid plan for Lemon checkout" },
-        { status: 400 }
-      );
-    }
-
-    const variantId = process.env[lemonVariantKey];
-
-    if (!variantId) {
-      return NextResponse.json(
-        { error: "Missing Lemon variant ENV variable" },
-        { status: 500 }
-      );
-    }
-
-    // Initialize Supabase
     const supabase = createClient(
-      process.env.SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Validate organization exists
-    const { data: org, error: orgErr } = await supabase
-      .from("organizations")
-      .select("*")
-      .eq("id", orgId)
-      .single();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (orgErr || !org) {
+    if (!user) {
       return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
+        { error: "Not authenticated" },
+        { status: 401 }
       );
     }
 
-    // Prepare Lemon checkout request
-    const body = JSON.stringify({
-      data: {
-        type: "checkouts",
-        attributes: {
-          checkout_data: {
-            custom: {
-              orgId,
-              plan,
+    const planMap: Record<string, string> = {
+      developer: process.env.LEMON_VARIANT_DEVELOPER!,
+      startup: process.env.LEMON_VARIANT_STARTUP!,
+      team: process.env.LEMON_VARIANT_TEAM!,
+      enterprise: process.env.LEMON_VARIANT_ENTERPRIS!,
+    };
+
+    const variantId = planMap[plan];
+
+    if (!variantId) {
+      return NextResponse.json(
+        { error: "Invalid plan selected" },
+        { status: 400 }
+      );
+    }
+
+    // -------------------------------
+    // ⭐ CREATE LEMON CHECKOUT SESSION
+    // -------------------------------
+    const res = await fetch(
+      process.env.LEMON_CHECKOUT_URL_BASE!,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+          "Content-Type": "application/json",
+          Accept: "application/vnd.api+json",
+        },
+        body: JSON.stringify({
+          data: {
+            type: "checkouts",
+            attributes: {
+              checkout_data: {
+                email: user.email,
+              },
+              product_options: {
+                enabled_variants: [variantId],
+              },
+              product: process.env.LEMON_STORE_ID!,
+              custom: {
+                user_id: user.id,
+                plan,
+              },
+              redirect_url: `${process.env.APP_URL}/dashboard/billing`,
             },
           },
-          product_options: {
-            enabled_variants: [variantId],
-          },
-        },
-        relationships: {
-          store: {
-            data: { type: "stores", id: process.env.LEMON_STORE_ID },
-          },
-        },
-      },
-    });
-
-    const checkoutUrl = `https://api.lemonsqueezy.com/v1/checkouts`;
-
-    const res = await fetch(checkoutUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-        Accept: "application/vnd.api+json",
-        "Content-Type": "application/json",
-      },
-      body,
-    });
+        }),
+      }
+    );
 
     const json = await res.json();
 
-    if (!json.data?.attributes?.url) {
+    if (!json?.data?.attributes?.url) {
       console.error("Lemon checkout error:", json);
       return NextResponse.json(
         { error: "Failed to create Lemon checkout" },
@@ -121,9 +92,11 @@ export async function POST(req: Request) {
       url: json.data.attributes.url,
     });
   } catch (err: any) {
-    console.error("Lemon checkout error:", err);
+    console.error("Lemon Checkout ERROR:", err);
     return NextResponse.json(
-      { error: err.message },
+      {
+        error: err.message || "Internal Server Error",
+      },
       { status: 500 }
     );
   }
