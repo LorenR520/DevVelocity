@@ -1,142 +1,133 @@
+// app/dashboard/billing/page.tsx
+
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-export default function BillingHome() {
-  const [billing, setBilling] = useState<any>(null);
+export default function BillingPage() {
+  const [org, setOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const res = await fetch("/api/billing/summary");
-      const data = await res.json();
-      setBilling(data);
+      try {
+        const res = await fetch("/api/org");
+        const data = await res.json();
+        setOrg(data.org ?? null);
+      } catch (err) {
+        console.error("Billing load error:", err);
+      }
       setLoading(false);
     }
+
     load();
   }, []);
 
   if (loading) {
     return (
-      <div className="text-center text-gray-300 py-20">
-        Loading billing…
-      </div>
+      <main className="text-center text-gray-300 py-20">
+        Loading billing...
+      </main>
     );
   }
 
-  if (!billing) {
+  if (!org) {
     return (
-      <div className="text-center text-red-400 py-20">
-        Failed to load billing.
-      </div>
+      <main className="text-center text-gray-300 py-20">
+        No billing profile found.
+      </main>
     );
   }
 
-  const {
-    current_plan,
-    seats,
-    pending_overage_amount,
-    next_invoice_date,
-    provider,
-  } = billing;
+  const planName = org.plan_id
+    ? org.plan_id.charAt(0).toUpperCase() + org.plan_id.slice(1)
+    : "Unknown";
+
+  const seatsUsed = org.seats_used ?? 1;
+  const seatsIncluded = org.seats_included ?? 1;
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-10">Billing</h1>
+    <main className="max-w-3xl mx-auto px-6 py-12 text-white">
+      <h1 className="text-3xl font-bold mb-8">Billing</h1>
 
-      {/* ============================== */}
-      {/* PLAN SECTION */}
-      {/* ============================== */}
-      <section className="bg-neutral-900 rounded-xl p-6 border border-neutral-800 mb-10">
-        <div className="flex justify-between items-start">
-          <div>
-            <h2 className="text-2xl font-semibold">{current_plan.name}</h2>
-            <p className="text-gray-400 text-sm mt-1">
-              Billing Provider: {provider === "stripe" ? "Stripe" : provider === "lemon" ? "Lemon Squeezy" : "Internal"}
-            </p>
-            <p className="text-xl font-bold mt-3">
-              {current_plan.price === "custom" ? "Custom Pricing" : `$${current_plan.price}/mo`}
-            </p>
-          </div>
+      {/* PLAN CARD */}
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 mb-10">
+        <h2 className="text-xl font-semibold mb-2">Current Plan</h2>
+        <p className="text-lg text-blue-400 mb-1">{planName}</p>
 
-          {current_plan.id !== "enterprise" && (
+        <p className="text-gray-400 text-sm mb-4">
+          You are subscribed to the <strong>{planName}</strong> plan.
+        </p>
+
+        <Link
+          href="/dashboard/billing/upgrade"
+          className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+        >
+          Change Plan
+        </Link>
+      </section>
+
+      {/* SEAT USAGE */}
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 mb-10">
+        <h2 className="text-xl font-semibold mb-4">Seat Usage</h2>
+
+        <p className="text-gray-300 mb-2">
+          Seats Used: <strong>{seatsUsed}</strong>
+        </p>
+
+        <p className="text-gray-300">
+          Seats Included:{" "}
+          <strong>
+            {seatsIncluded === "custom" ? "Custom" : seatsIncluded}
+          </strong>
+        </p>
+
+        {typeof seatsIncluded === "number" && seatsUsed > seatsIncluded && (
+          <p className="text-red-400 mt-3">
+            You are over your included seats — overage charges apply.
+          </p>
+        )}
+
+        <Link
+          href="/dashboard/team"
+          className="inline-block mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+        >
+          Manage Team
+        </Link>
+      </section>
+
+      {/* LINKS */}
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+        <h2 className="text-xl font-semibold mb-3">Billing Actions</h2>
+
+        <ul className="text-blue-400 space-y-2">
+          <li>
+            <Link
+              href="/dashboard/billing/invoices"
+              className="hover:underline"
+            >
+              View Invoices
+            </Link>
+          </li>
+
+          <li>
+            <Link
+              href="/dashboard/billing/usage"
+              className="hover:underline"
+            >
+              View Usage & Overage Details
+            </Link>
+          </li>
+
+          <li>
             <Link
               href="/dashboard/billing/upgrade"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-md"
+              className="hover:underline"
             >
-              Change Plan
+              Change / Upgrade Plan
             </Link>
-          )}
-        </div>
-
-        <div className="mt-4 text-gray-300">
-          <p>Seats: {seats.total}</p>
-
-          {seats.overage > 0 && (
-            <p className="text-red-400">
-              Additional seats: {seats.overage} (billed monthly)
-            </p>
-          )}
-        </div>
-
-        <p className="text-gray-400 text-sm mt-3">
-          Next invoice: {new Date(next_invoice_date).toLocaleDateString()}
-        </p>
-      </section>
-
-      {/* ============================== */}
-      {/* USAGE + METERED */}
-      {/* ============================== */}
-      <section className="bg-neutral-900 rounded-xl p-6 border border-neutral-800 mb-10">
-        <div className="flex justify-between">
-          <h2 className="text-xl font-semibold">Usage & Metered</h2>
-
-          <Link
-            href="/dashboard/billing/usage"
-            className="text-blue-400 underline text-sm"
-          >
-            View Details
-          </Link>
-        </div>
-
-        <div className="mt-4 text-gray-300">
-          <p>Pending Overage Charges: ${pending_overage_amount.toFixed(2)}</p>
-        </div>
-      </section>
-
-      {/* ============================== */}
-      {/* INVOICES */}
-      {/* ============================== */}
-      <section className="bg-neutral-900 rounded-xl p-6 border border-neutral-800">
-        <div className="flex justify-between">
-          <h2 className="text-xl font-semibold">Invoices</h2>
-          <Link
-            href="/dashboard/billing/invoices"
-            className="text-blue-400 underline text-sm"
-          >
-            View All
-          </Link>
-        </div>
-
-        <ul className="mt-4 text-gray-300 space-y-2 text-sm">
-          {billing.recent_invoices.length === 0 && (
-            <li>No recent invoices.</li>
-          )}
-
-          {billing.recent_invoices.map((inv: any) => (
-            <li key={inv.id} className="flex justify-between">
-              <span>
-                {inv.provider === "stripe"
-                  ? "Stripe"
-                  : inv.provider === "lemon"
-                  ? "Lemon Squeezy"
-                  : "Internal"}{" "}
-                — {new Date(inv.date).toLocaleDateString()}
-              </span>
-              <span>${inv.amount}</span>
-            </li>
-          ))}
+          </li>
         </ul>
       </section>
     </main>
