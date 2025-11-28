@@ -1,9 +1,9 @@
 // app/api/billing/checkout/stripe/route.ts
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import pricing from "@/marketing/pricing.json";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
@@ -14,19 +14,20 @@ export async function POST(req: Request) {
     }
 
     const plan = pricing.plans.find((p) => p.id === planId);
-
     if (!plan) {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid planId" }, { status: 400 });
     }
 
-    // Enterprise requires contact, not checkout
+    // Enterprise → Contact sales instead
     if (planId === "enterprise") {
       return NextResponse.json({
         url: "https://devvelocity.app/contact-enterprise",
       });
     }
 
-    // Initialize Supabase Admin
+    // ----------------------------
+    // ⭐ Supabase: Get Auth user
+    // ----------------------------
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
@@ -40,7 +41,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Load org
+    // ----------------------------
+    // ⭐ Supabase: Organization
+    // ----------------------------
     const { data: org, error: orgErr } = await supabase
       .from("organizations")
       .select("*")
@@ -54,35 +57,37 @@ export async function POST(req: Request) {
       );
     }
 
-    // Stripe price ID for this plan
-    const priceId = process.env[`STRIPE_PRICE_${planId.toUpperCase()}`];
-
-    if (!priceId) {
-      return NextResponse.json(
-        { error: `Missing Stripe price ID for plan ${planId}` },
-        { status: 500 }
-      );
-    }
-
+    // ----------------------------
+    // ⭐ Stripe
+    // ----------------------------
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
+
+    const stripePriceId =
+      process.env[`STRIPE_PRICE_${planId.toUpperCase()}`];
+
+    if (!stripePriceId) {
+      return NextResponse.json(
+        { error: `Missing Stripe price for ${planId}` },
+        { status: 500 }
+      );
+    }
 
     const quantitySeats = seats ?? plan.seats_included ?? 1;
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      payment_method_types: ["card"],
       customer_email: user.email!,
       metadata: {
-        org_id: org.id,
         user_id: user.id,
+        org_id: org.id,
         plan_id: planId,
         seats: quantitySeats,
       },
       line_items: [
         {
-          price: priceId,
+          price: stripePriceId,
           quantity: 1,
         },
       ],
@@ -94,7 +99,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal Server Error" },
+      { error: err.message ?? "Internal error" },
       { status: 500 }
     );
   }
