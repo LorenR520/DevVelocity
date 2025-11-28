@@ -18,17 +18,16 @@ export async function POST(req: Request) {
     );
 
     // -------------------------------
-    // 1. AUTH — validate user session
+    // 1. AUTH — validate token
     // -------------------------------
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!token) {
       return NextResponse.json(
-        { error: "Missing auth token" },
+        { error: "Missing token" },
         { status: 401 }
       );
     }
 
-    const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
       error: userErr,
@@ -46,19 +45,19 @@ export async function POST(req: Request) {
 
     if (!orgId) {
       return NextResponse.json(
-        { error: "User is missing an org_id" },
+        { error: "User missing org_id" },
         { status: 403 }
       );
     }
 
     // -------------------------------
-    // Restrict feature by plan tier
+    // Plan Restrictions
     // -------------------------------
     if (plan === "developer") {
       return NextResponse.json(
         {
           error:
-            "File Portal is not included in the Developer plan. Upgrade to Startup or higher to save files.",
+            "File Portal is not available on the Developer plan. Upgrade to Startup or higher.",
         },
         { status: 403 }
       );
@@ -76,13 +75,13 @@ export async function POST(req: Request) {
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or access denied." },
+        { error: "File not found." },
         { status: 404 }
       );
     }
 
     // -------------------------------
-    // 3. Write version history entry
+    // 3. Create version history
     // -------------------------------
     await supabase.from("file_version_history").insert({
       file_id,
@@ -92,13 +91,14 @@ export async function POST(req: Request) {
     });
 
     // -------------------------------
-    // 4. Update main file content
+    // 4. Update the file
     // -------------------------------
     const { error: updateErr } = await supabase
       .from("files")
       .update({
         content: content,
         latest_version: file.latest_version + 1,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", file_id)
       .eq("org_id", orgId);
@@ -110,10 +110,27 @@ export async function POST(req: Request) {
       );
     }
 
+    // -------------------------------
+    // 5. USAGE TRACKING (important)
+    // -------------------------------
+    // Every file update counts as:
+    // +1 pipeline
+    // +1 provider API call
+    // +1 build minute (approximate)
+    const usagePayload = {
+      org_id: orgId,
+      date: new Date().toISOString().slice(0, 10),
+      build_minutes: 1,
+      pipelines_run: 1,
+      provider_api_calls: 1,
+    };
+
+    await supabase.from("usage_logs").insert(usagePayload);
+
     return NextResponse.json({
       success: true,
-      message: "File updated and version saved.",
-      new_version: file.latest_version + 1,
+      version: file.latest_version + 1,
+      usage_tracked: usagePayload,
     });
   } catch (err: any) {
     console.error("Update error:", err);
