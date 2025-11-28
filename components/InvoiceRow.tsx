@@ -1,57 +1,55 @@
-"use client";
+import React from "react";
 
-import { useEffect, useState } from "react";
+interface InvoiceProps {
+  invoice: {
+    id: string;
+    provider: string;
+    date: string;
+    amount: number;
+    currency: string;
+    pdf?: string;
+    description?: string;
+  };
+}
 
-export default function InvoiceRow({ source }: { source: "stripe" | "lemon" }) {
-  const [invoices, setInvoices] = useState([]);
-
-  useEffect(() => {
-    async function load() {
-      const res = await fetch(`/api/billing/${source}/invoices`);
-      const json = await res.json();
-      setInvoices(json || []);
-    }
-    load();
-  }, [source]);
-
-  if (!invoices.length) {
-    return (
-      <div className="text-gray-400 text-sm mb-4">
-        No {source} invoices found.
-      </div>
-    );
-  }
-
+export default function InvoiceRow({ invoice }: InvoiceProps) {
   return (
-    <div className="mb-10">
-      <h2 className="text-xl font-semibold mb-4 capitalize">{source} Invoices</h2>
+    <div className="p-4 bg-neutral-900 rounded-lg border border-neutral-800">
+      <div className="flex justify-between items-center">
+        <div>
+          <p className="text-lg font-semibold capitalize">
+            {invoice.provider === "stripe"
+              ? "Stripe"
+              : invoice.provider === "lemon"
+              ? "Lemon Squeezy"
+              : "DevVelocity (Internal)"}
+          </p>
 
-      <div className="space-y-3">
-        {invoices.map((inv: any) => (
-          <div
-            key={inv.id}
-            className="flex justify-between bg-neutral-900 border border-neutral-800 p-4 rounded-lg"
-          >
-            <div>
-              <p className="text-white font-medium">{inv.description}</p>
-              <p className="text-gray-400 text-sm">
-                {new Date(inv.date).toLocaleDateString()}
-              </p>
-            </div>
+          <p className="text-gray-400 text-sm mt-1">
+            {new Date(invoice.date).toLocaleDateString()}
+          </p>
 
-            <div className="text-right">
-              <p className="text-white font-semibold">${inv.amount}</p>
+          {invoice.description && (
+            <p className="text-gray-500 text-xs mt-1">{invoice.description}</p>
+          )}
+        </div>
 
-              <a
-                href={inv.url}
-                target="_blank"
-                className="text-blue-400 text-sm underline"
-              >
-                View
-              </a>
-            </div>
-          </div>
-        ))}
+        <div className="text-right">
+          <p className="text-xl font-bold">
+            ${invoice.amount.toFixed(2)} {invoice.currency.toUpperCase()}
+          </p>
+
+          {invoice.pdf && (
+            <a
+              href={invoice.pdf}
+              className="text-blue-400 underline text-sm mt-1 inline-block"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Download PDF
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );
