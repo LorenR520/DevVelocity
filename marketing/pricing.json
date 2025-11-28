@@ -4,45 +4,58 @@
       "id": "developer",
       "name": "Developer",
       "price": 39,
-      "providers": 1,
-      "updates": "monthly",
-      "builder": "basic",
+      "display_price": "$39/mo",
       "sso": "none",
       "seats_included": 1,
-      "seat_price": 5
+      "seat_price": 5,
+      "limits": {
+        "build_minutes": 300,
+        "pipelines": 50,
+        "api_calls": 10000
+      }
     },
     {
       "id": "startup",
       "name": "Startup",
       "price": 99,
-      "providers": 3,
-      "updates": "weekly",
-      "builder": "advanced",
+      "display_price": "$99/mo",
       "sso": "basic",
       "seats_included": 3,
-      "seat_price": 7
+      "seat_price": 12,
+      "limits": {
+        "build_minutes": 1500,
+        "pipelines": 300,
+        "api_calls": 80000
+      }
     },
     {
       "id": "team",
       "name": "Team",
       "price": 299,
-      "providers": 7,
-      "updates": "daily",
-      "builder": "enterprise",
+      "display_price": "$299/mo",
       "sso": "advanced",
       "seats_included": 10,
-      "seat_price": 9
+      "seat_price": 18,
+      "limits": {
+        "build_minutes": 5000,
+        "pipelines": 800,
+        "api_calls": 250000
+      }
     },
     {
       "id": "enterprise",
       "name": "Enterprise",
       "price": 1250,
-      "providers": "unlimited",
-      "updates": "continuous",
-      "builder": "private",
+      "display_price": "$1250+",
       "sso": "gov/enterprise",
+      "custom_pricing": true,
       "seats_included": "custom",
-      "seat_price": "custom"
+      "seat_price": "custom",
+      "limits": {
+        "build_minutes": "custom",
+        "pipelines": "custom",
+        "api_calls": "custom"
+      }
     }
   ]
 }
