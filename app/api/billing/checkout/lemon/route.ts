@@ -1,68 +1,37 @@
 // app/api/billing/checkout/lemon/route.ts
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import pricing from "@/marketing/pricing.json";
 
 export async function POST(req: Request) {
   try {
-    const { plan } = await req.json();
+    const { plan, userId, email } = await req.json();
 
-    if (!plan) {
+    if (!plan || !userId) {
       return NextResponse.json(
-        { error: "Missing plan ID" },
+        { error: "Missing plan or userId" },
         { status: 400 }
       );
     }
 
-    // Map DevVelocity → LemonSqueezy Variant IDs
-    const planToVariant: Record<string, number> = {
-      developer: 101,
-      startup: 102,
-      team: 103,
-      enterprise: 104, // you will configure "Contact Sales" variant
-    };
+    const selected = pricing.plans.find((p) => p.id === plan);
 
-    const variantId = planToVariant[plan];
+    if (!selected) {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    }
+
+    // Lemon Store + Variant IDs (you can update later)
+    const storeId = process.env.LEMON_STORE_ID!;
+    const variantId = process.env[`LEMON_VARIANT_${plan.toUpperCase()}`];
 
     if (!variantId) {
       return NextResponse.json(
-        { error: "Invalid plan" },
-        { status: 400 }
+        { error: `Missing variant ID for plan: ${plan}` },
+        { status: 500 }
       );
     }
 
-    // --------------------------------------------
-    // ⭐ SUPABASE SESSION: Identify Current User
-    // --------------------------------------------
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
-
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json(
-        { error: "No auth token provided" },
-        { status: 401 }
-      );
-    }
-
-    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-
-    if (userErr || !userData?.user) {
-      return NextResponse.json(
-        { error: "Invalid or expired session token" },
-        { status: 401 }
-      );
-    }
-
-    const user = userData.user;
-
-    // --------------------------------------------
-    // ⭐ Create Lemon Checkout
-    // --------------------------------------------
-    const res = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
+    const checkout = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
@@ -73,58 +42,34 @@ export async function POST(req: Request) {
         data: {
           type: "checkouts",
           attributes: {
+            store_id: storeId,
+            variant_id: variantId,
             checkout_data: {
-              email: user.email,
+              email: email ?? "",
               custom: {
-                user_id: user.id,
+                userId,
+                plan,
               },
             },
-            product_options: {
-              redirect_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing`,
-              receipt_button_text: "Return to DevVelocity",
-            },
-            expires_at: null,
-          },
-          relationships: {
-            store: {
-              data: { type: "stores", id: process.env.LEMON_STORE_ID },
-            },
-            variant: {
-              data: { type: "variants", id: variantId.toString() },
-            },
+            preview: false,
           },
         },
       }),
-    });
+    }).then((r) => r.json());
 
-    if (!res.ok) {
-      console.error("Lemon checkout creation error:", await res.text());
+    const url = checkout?.data?.attributes?.url;
+
+    if (!url) {
+      console.error("Lemon checkout error:", checkout);
       return NextResponse.json(
-        { error: "Failed to create checkout session" },
+        { error: "Failed to create Lemon checkout" },
         { status: 500 }
       );
     }
 
-    const json = await res.json();
-    const checkoutUrl =
-      json.data?.attributes?.urls?.checkout ?? null;
-
-    if (!checkoutUrl) {
-      return NextResponse.json(
-        { error: "Checkout URL missing from Lemon response" },
-        { status: 500 }
-      );
-    }
-
-    // --------------------------------------------
-    // ⭐ Return Checkout URL
-    // --------------------------------------------
-    return NextResponse.json({
-      ok: true,
-      url: checkoutUrl,
-    });
+    return NextResponse.json({ url });
   } catch (err: any) {
-    console.error("Lemon Checkout Error:", err);
+    console.error("Lemon checkout error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
