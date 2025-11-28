@@ -4,47 +4,72 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 export async function GET() {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+  try {
+    const invoices: any[] = [];
 
-  // STRIPE invoices
-  const invoiceRes = await stripe.invoices.list({
-    limit: 20,
-    expand: ["data.customer"],
-  });
+    // -------------------------------
+    // 1️⃣   STRIPE INVOICES
+    // -------------------------------
+    try {
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-  const stripeInvoices = invoiceRes.data.map((inv) => ({
-    id: inv.id,
-    amount: inv.amount_paid / 100,
-    currency: inv.currency.toUpperCase(),
-    date: inv.created * 1000,
-    provider: "stripe",
-    status: inv.status,
-    pdf: inv.invoice_pdf
-  }));
+      const stripeInvoices = await stripe.invoices.list({
+        limit: 100,
+      });
 
-  // LEMON invoices
-  const lemonRes = await fetch("https://api.lemonsqueezy.com/v1/invoices", {
-    headers: {
-      Authorization: `Bearer ${process.env.LEMON_API_KEY!}`,
-      Accept: "application/vnd.api+json",
-    },
-  });
+      for (const inv of stripeInvoices.data) {
+        invoices.push({
+          id: inv.id,
+          provider: "stripe",
+          date: inv.created * 1000,
+          amount: (inv.amount_paid ?? inv.amount_due) / 100,
+          currency: inv.currency?.toUpperCase() ?? "USD",
+          pdf: inv.invoice_pdf ?? null,
+        });
+      }
+    } catch (err) {
+      console.error("Stripe invoice error:", err);
+    }
 
-  const lemonJson = await lemonRes.json();
+    // -------------------------------
+    // 2️⃣   LEMON SQUEEZY INVOICES
+    // -------------------------------
+    try {
+      const res = await fetch("https://api.lemonsqueezy.com/v1/orders", {
+        headers: {
+          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+          Accept: "application/vnd.api+json",
+        },
+      });
 
-  const lemonInvoices = (lemonJson.data || []).map((i: any) => ({
-    id: i.id,
-    amount: i.attributes.total / 100,
-    currency: "USD",
-    date: new Date(i.attributes.created_at).getTime(),
-    provider: "lemon",
-    status: i.attributes.status,
-    pdf: i.attributes.urls?.invoice_url || null
-  }));
+      const json = await res.json();
+      const orders = json.data || [];
 
-  return NextResponse.json({
-    invoices: [...stripeInvoices, ...lemonInvoices].sort(
-      (a, b) => b.date - a.date
-    ),
-  });
+      for (const o of orders) {
+        invoices.push({
+          id: o.id,
+          provider: "lemonsqueezy",
+          date: new Date(o.attributes.created_at).getTime(),
+          amount: parseFloat(o.attributes.total) / 100,
+          currency: o.attributes.currency ?? "USD",
+          pdf: o.attributes.urls?.invoice ?? null,
+        });
+      }
+    } catch (err) {
+      console.error("Lemon invoice error:", err);
+    }
+
+    // -------------------------------
+    // Sort latest → oldest
+    // -------------------------------
+    invoices.sort((a, b) => b.date - a.date);
+
+    return NextResponse.json({ invoices });
+  } catch (err: any) {
+    console.error("INVOICE API ERROR:", err);
+    return NextResponse.json(
+      { error: "Server error", message: err?.message },
+      { status: 500 }
+    );
+  }
 }
