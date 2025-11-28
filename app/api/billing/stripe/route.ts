@@ -1,157 +1,156 @@
-// app/api/billing/stripe/route.ts
-
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import { sendReceipt } from "@/server/email/send-receipt";
 
 export const config = {
-  runtime: "edge",
+  api: {
+    bodyParser: false, // Stripe requires raw body
+  },
 };
 
 export async function POST(req: Request) {
+  const body = await req.text();
+  const signature = req.headers.get("stripe-signature") || "";
+
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: "2023-10-16",
+  });
+
+  let event;
+
   try {
-    const body = await req.text();
-    const sig = req.headers.get("stripe-signature");
-
-    if (!sig) {
-      return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
-    }
-
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      apiVersion: "2023-10-16",
-    });
-
-    let event;
-
-    try {
-      event = stripe.webhooks.constructEvent(
-        body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET!
-      );
-    } catch (err: any) {
-      console.error("⚠️ Stripe signature verification failed:", err);
-      return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
-    }
-
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    event = stripe.webhooks.constructEvent(
+      body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET!
     );
+  } catch (err: any) {
+    console.error("❌ Stripe webhook signature error:", err.message);
+    return NextResponse.json(
+      { error: `Webhook Error: ${err.message}` },
+      { status: 400 }
+    );
+  }
 
-    // ============================================================
-    // ⭐ HANDLE STRIPE EVENTS
-    // ============================================================
+  // Initialize Supabase Admin
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
+  // ------------------------------------------------------------------
+  // ⭐ HANDLERS FOR ALL STRIPE BILLING EVENTS
+  // ------------------------------------------------------------------
+  try {
     switch (event.type) {
-      // ----------------------------------------------------------
-      // Subscription created / upgraded / downgraded
-      // ----------------------------------------------------------
-      case "customer.subscription.updated":
+      // ------------------------------
+      // ⭐ Subscription Created
+      // ------------------------------
       case "customer.subscription.created": {
-        const sub: any = event.data.object;
-        const orgId = sub.metadata.orgId;
-        const plan = sub.metadata.plan;
+        const sub = event.data.object as Stripe.Subscription;
+        const customer = sub.customer as any;
+        const plan = sub.items.data[0].price.id;
 
-        console.log("🔄 Updating org billing plan:", orgId, plan);
+        const userId = customer.metadata.userId;
 
-        await supabase
-          .from("organizations")
-          .update({
-            plan_id: plan,
+        await supabase.auth.admin.updateUserById(userId, {
+          app_metadata: {
+            billing_provider: "stripe",
             stripe_subscription_id: sub.id,
-            subscription_status: sub.status,
-          })
-          .eq("id", orgId);
-
-        break;
-      }
-
-      // ----------------------------------------------------------
-      // Subscription canceled
-      // ----------------------------------------------------------
-      case "customer.subscription.deleted": {
-        const sub: any = event.data.object;
-        const orgId = sub.metadata.orgId;
-
-        console.log("❌ Subscription canceled:", orgId);
-
-        await supabase
-          .from("organizations")
-          .update({
-            subscription_status: "canceled",
-          })
-          .eq("id", orgId);
-
-        break;
-      }
-
-      // ----------------------------------------------------------
-      // Invoice paid → Send receipt email
-      // ----------------------------------------------------------
-      case "invoice.payment_succeeded": {
-        const invoice: any = event.data.object;
-
-        const amount = invoice.amount_paid / 100;
-        const orgId = invoice.metadata?.orgId;
-        const plan = invoice.lines.data[0]?.description ?? "Subscription";
-
-        const seats =
-          invoice.lines.data[0]?.quantity ?? 1;
-
-        const email = invoice.customer_email;
-
-        console.log("📬 Sending receipt email:", email);
-
-        await sendReceipt({
-          to: email,
-          plan,
-          seats,
-          amount,
-        });
-
-        // Log internal billing record
-        await supabase.from("billing_events").insert({
-          org_id: orgId,
-          type: "stripe_payment",
-          amount,
-          details: {
-            invoice_id: invoice.id,
+            stripe_customer_id: customer.id,
             plan,
-            seats,
+            status: sub.status,
           },
         });
 
         break;
       }
 
-      // ----------------------------------------------------------
-      // Invoice failed → notify user or mark delinquent
-      // ----------------------------------------------------------
-      case "invoice.payment_failed": {
-        const invoice: any = event.data.object;
-        const orgId = invoice.metadata?.orgId;
+      // ------------------------------
+      // ⭐ Subscription Updated (plan, status)
+      // ------------------------------
+      case "customer.subscription.updated": {
+        const sub = event.data.object as Stripe.Subscription;
+        const customer = sub.customer as any;
+        const plan = sub.items.data[0].price.id;
+        const userId = customer.metadata.userId;
 
-        console.log("⚠️ Invoice payment failed:", orgId);
-
-        await supabase
-          .from("organizations")
-          .update({ subscription_status: "past_due" })
-          .eq("id", orgId);
+        await supabase.auth.admin.updateUserById(userId, {
+          app_metadata: {
+            billing_provider: "stripe",
+            stripe_subscription_id: sub.id,
+            stripe_customer_id: customer.id,
+            plan,
+            status: sub.status,
+          },
+        });
 
         break;
       }
 
+      // ------------------------------
+      // ⭐ Subscription Deleted
+      // ------------------------------
+      case "customer.subscription.deleted": {
+        const sub = event.data.object as Stripe.Subscription;
+        const customer = sub.customer as any;
+        const userId = customer.metadata.userId;
+
+        await supabase.auth.admin.updateUserById(userId, {
+          app_metadata: {
+            billing_provider: "stripe",
+            plan: "free",
+            status: "canceled",
+          },
+        });
+
+        break;
+      }
+
+      // ------------------------------
+      // ⭐ Invoice Paid (seat, metered, or base subscription)
+      // ------------------------------
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = invoice.customer as string;
+
+        // Fetch userId from stored metadata
+        const customer = await stripe.customers.retrieve(customerId);
+        const userId = (customer as any).metadata.userId;
+
+        // Save invoice to Supabase billing history
+        await supabase.from("billing_events").insert({
+          provider: "stripe",
+          invoice_id: invoice.id,
+          org_id: userId, // You will map users → orgs soon
+          amount: invoice.amount_paid / 100,
+          currency: invoice.currency,
+          type: "stripe_invoice",
+          details: invoice.lines.data,
+        });
+
+        break;
+      }
+
+      // ------------------------------
+      // ⭐ Invoice Failed
+      // ------------------------------
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        console.warn("❌ Stripe Invoice Failed:", invoice.id);
+        break;
+      }
+
       default:
-        console.log(`➡️ Unhandled event type: ${event.type}`);
+        console.log("ℹ️ Unhandled Stripe event:", event.type);
+        break;
     }
 
     return NextResponse.json({ received: true });
   } catch (err: any) {
-    console.error("Stripe webhook error:", err);
+    console.error("❌ Stripe webhook handler error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Webhook error" },
+      { error: err.message },
       { status: 500 }
     );
   }
