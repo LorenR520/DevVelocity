@@ -11,86 +11,116 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // -------------------------------------
-    // 🎟️ STRIPE INVOICES
-    // -------------------------------------
-    let stripeInvoices: any[] = [];
+    // --------------------------
+    // 1) Get authenticated user
+    // --------------------------
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
 
-    if (process.env.STRIPE_SECRET_KEY) {
+    if (userErr || !user) {
+      return NextResponse.json({ invoices: [] });
+    }
+
+    const userId = user.id;
+
+    // --------------------------
+    // 2) Gather Stripe invoices
+    // --------------------------
+    let stripeInvoices: any[] = [];
+    try {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
         apiVersion: "2023-10-16",
       });
 
-      const list = await stripe.invoices.list({ limit: 100 });
+      if (user.app_metadata?.stripe_customer_id) {
+        const invList = await stripe.invoices.list({
+          customer: user.app_metadata.stripe_customer_id,
+          limit: 50,
+        });
 
-      stripeInvoices = list.data.map((inv) => ({
-        id: inv.id,
-        provider: "stripe",
-        amount: inv.amount_paid / 100,
-        currency: inv.currency.toUpperCase(),
-        date: inv.status_transitions.finalized_at
-          ? new Date(inv.status_transitions.finalized_at * 1000)
-          : new Date(inv.created * 1000),
-        pdf: inv.invoice_pdf,
-      }));
+        stripeInvoices = invList.data.map((inv) => ({
+          provider: "stripe",
+          id: inv.id,
+          date: inv.status_transitions.finalized_at
+            ? new Date(inv.status_transitions.finalized_at * 1000)
+            : new Date(inv.created * 1000),
+          amount: inv.total / 100,
+          currency: inv.currency.toUpperCase(),
+          pdf: inv.invoice_pdf,
+        }));
+      }
+    } catch (e) {
+      console.warn("Stripe invoice error:", e);
     }
 
-    // -------------------------------------
-    // 🍋 LEMON SQUEEZY INVOICES
-    // -------------------------------------
+    // --------------------------
+    // 3) Gather Lemon invoices
+    // --------------------------
     let lemonInvoices: any[] = [];
+    try {
+      const lemonCustomerId = user.app_metadata?.lemon_customer_id;
 
-    if (process.env.LEMON_API_KEY) {
-      const res = await fetch("https://api.lemonsqueezy.com/v1/invoices", {
-        headers: {
-          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-          Accept: "application/vnd.api+json",
-        },
-      });
+      if (lemonCustomerId) {
+        const res = await fetch(
+          `https://api.lemonsqueezy.com/v1/invoices?filter[customer_id]=${lemonCustomerId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+              Accept: "application/vnd.api+json",
+            },
+          }
+        );
 
-      const json = await res.json();
-      const data = json.data ?? [];
+        const json = await res.json();
+        const data = json.data || [];
 
-      lemonInvoices = data.map((inv: any) => ({
-        id: inv.id,
-        provider: "lemon",
-        amount: inv.attributes.total / 100,
-        currency: inv.attributes.currency.toUpperCase(),
-        date: new Date(inv.attributes.created_at),
-        pdf: inv.attributes.urls?.invoice_url,
-      }));
+        lemonInvoices = data.map((i: any) => ({
+          provider: "lemon",
+          id: i.id,
+          date: new Date(i.attributes.created_at),
+          amount: i.attributes.total / 100,
+          currency: i.attributes.currency.toUpperCase(),
+          pdf: i.attributes.urls.invoice_url,
+        }));
+      }
+    } catch (e) {
+      console.warn("Lemon Squeezy invoice error:", e);
     }
 
-    // -------------------------------------
-    // 🧮 INTERNAL (usage + seats)
-    // -------------------------------------
-    const { data: internal, error: intErr } = await supabase
+    // --------------------------
+    // 4) Internal usage & seat billing
+    // --------------------------
+    const { data: internal, error: internalErr } = await supabase
       .from("billing_events")
       .select("*")
+      .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
     const internalInvoices =
       internal?.map((e) => ({
-        id: e.id,
         provider: "internal",
+        id: e.id,
+        date: new Date(e.created_at),
         amount: e.amount,
         currency: "USD",
-        date: new Date(e.created_at),
-        pdf: null,
+        type: e.type,
+        details: e.details,
       })) ?? [];
 
-    // -------------------------------------
-    // 🧾 MERGE ALL INVOICES
-    // -------------------------------------
-    const all = [
+    // --------------------------
+    // 5) Combine all
+    // --------------------------
+    const invoices = [
       ...stripeInvoices,
       ...lemonInvoices,
       ...internalInvoices,
-    ].sort((a, b) => b.date.getTime() - a.date.getTime());
+    ].sort((a, b) => b.date - a.date);
 
-    return NextResponse.json({ invoices: all });
+    return NextResponse.json({ invoices });
   } catch (err: any) {
-    console.error("INVOICE API ERROR:", err);
+    console.error("Invoices route error:", err);
     return NextResponse.json(
       { error: err.message ?? "Server error" },
       { status: 500 }
