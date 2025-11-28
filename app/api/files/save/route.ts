@@ -3,91 +3,95 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { name, type, content } = await req.json();
+    const { filename, content } = await req.json();
 
-    if (!name || !content) {
+    if (!filename || !content) {
       return NextResponse.json(
-        { error: "Name and content are required." },
+        { error: "Filename and content required" },
         { status: 400 }
       );
     }
 
-    // ----------------------------------------
-    // Auth: validate user session
-    // ----------------------------------------
+    // ------------------------------------------------
+    // 🔐 1. Auth: Get logged-in user
+    // ------------------------------------------------
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!
     );
 
     const {
       data: { user },
-      error: authErr,
     } = await supabase.auth.getUser();
 
-    if (authErr || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized." },
-        { status: 401 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ----------------------------------------
-    // Load the user's organization + plan
-    // ----------------------------------------
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("id, plan_id")
-      .eq("owner_id", user.id)
-      .single();
+    // ------------------------------------------------
+    // 📦 2. Enforce Plan Gating
+    // ------------------------------------------------
+    const plan = user.app_metadata?.plan ?? "developer";
+    const allowedPlans = ["startup", "team", "enterprise"];
 
-    if (!org) {
-      return NextResponse.json(
-        { error: "Organization not found." },
-        { status: 404 }
-      );
-    }
-
-    // ----------------------------------------
-    // 🚫 PLAN LIMIT: Developer tier cannot use File Portal
-    // ----------------------------------------
-    if (org.plan_id === "developer") {
+    if (!allowedPlans.includes(plan)) {
       return NextResponse.json(
         {
           error:
-            "File Portal is not available on the Developer plan. Upgrade to Startup or higher to unlock file saving.",
+            "File Portal is available only for Startup, Team, and Enterprise plans.",
         },
         { status: 403 }
       );
     }
 
-    // ----------------------------------------
-    // Insert file
-    // ----------------------------------------
-    const { data, error } = await supabase
-      .from("saved_files")
-      .insert({
-        org_id: org.id,
-        user_id: user.id,
-        name,
-        type,
-        content,
-      })
-      .select("*")
-      .single();
+    // ------------------------------------------------
+    // 📥 3. Save File to Supabase Storage
+    // ------------------------------------------------
+    const path = `${user.id}/${Date.now()}-${filename}`;
 
-    if (error) {
+    const upload = await supabase.storage
+      .from("user-files")
+      .upload(path, content, {
+        upsert: false,
+      });
+
+    if (upload.error) {
+      console.error(upload.error);
       return NextResponse.json(
-        { error: error.message },
+        { error: "File upload failed" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ file: data });
+    // ------------------------------------------------
+    // 🗄️ 4. Save File Metadata to DB
+    // ------------------------------------------------
+    const { error: dbErr } = await supabase.from("user_files").insert({
+      user_id: user.id,
+      filename,
+      storage_path: path,
+      created_at: new Date().toISOString(),
+    });
+
+    if (dbErr) {
+      console.error(dbErr);
+      return NextResponse.json(
+        { error: "Database insert failed" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      file: {
+        filename,
+        path,
+      },
+    });
   } catch (err: any) {
-    console.error("File Save Error:", err);
+    console.error("File save error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Error saving file." },
+      { error: err.message ?? "Server error" },
       { status: 500 }
     );
   }
