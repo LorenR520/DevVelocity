@@ -1,82 +1,78 @@
-// app/api/billing/checkout/stripe/route.ts
-
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import pricing from "@/marketing/pricing.json";
 
+export const runtime = "edge"; // Cloudflare-compatible
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { plan, userId, email, orgId } = body;
+    const { userId, orgId, plan } = await req.json();
 
-    if (!plan || !userId || !orgId) {
+    if (!userId || !plan || !orgId) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing userId, orgId, or plan" },
         { status: 400 }
       );
     }
 
-    const selected = pricing.plans.find((p: any) => p.id === plan);
-
+    const selected = pricing.plans.find((p) => p.id === plan);
     if (!selected) {
       return NextResponse.json(
-        { error: "Invalid plan" },
+        { error: `Invalid plan: ${plan}` },
         { status: 400 }
       );
+    }
+
+    // Enterprise → no automated checkout
+    if (plan === "enterprise") {
+      return NextResponse.json({
+        url: `${process.env.APP_URL}/contact/sales?org=${orgId}`,
+      });
     }
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    // Stripe price lookup
-    const stripePrice = selected.stripe_price_id;
+    // Create Stripe Checkout Session
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
 
-    if (!stripePrice) {
-      return NextResponse.json(
-        { error: "Stripe price ID not configured for this plan" },
-        { status: 500 }
-      );
-    }
+      // Until email is known at login-time, leave blank
+      customer_email: "",
 
-    // Create Customer (or update)
-    const customer = await stripe.customers.create({
-      email,
       metadata: {
         userId,
         orgId,
         plan,
       },
-    });
 
-    // Create Stripe checkout session
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customer.id,
       line_items: [
         {
-          price: stripePrice,
+          price_data: {
+            currency: "usd",
+            recurring: {
+              interval: "month",
+            },
+            unit_amount: selected.price * 100, // convert to cents
+            product_data: {
+              name: selected.name,
+              description: `${selected.providers} providers • ${selected.updates} updates`,
+            },
+          },
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata: {
-          userId,
-          orgId,
-          plan,
-        },
-      },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=1`,
+
+      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
     });
 
-    return NextResponse.json({
-      url: session.url,
-    });
-  } catch (err: any) {
-    console.error("Stripe checkout error:", err);
+    return NextResponse.json({ url: session.url });
+  } catch (error: any) {
+    console.error("Stripe checkout error:", error);
     return NextResponse.json(
-      { error: err.message ?? "Stripe checkout failed" },
+      { error: error.message },
       { status: 500 }
     );
   }
