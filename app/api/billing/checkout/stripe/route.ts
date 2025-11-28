@@ -1,78 +1,133 @@
+// app/api/billing/checkout/stripe/route.ts
+
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import pricing from "@/marketing/pricing.json";
-
-export const runtime = "edge"; // Cloudflare-compatible
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId, plan } = await req.json();
+    const { plan, seats } = await req.json();
 
-    if (!userId || !plan || !orgId) {
+    if (!plan) {
       return NextResponse.json(
-        { error: "Missing userId, orgId, or plan" },
+        { error: "Missing plan" },
         { status: 400 }
       );
     }
 
-    const selected = pricing.plans.find((p) => p.id === plan);
-    if (!selected) {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // Fetch user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
       return NextResponse.json(
-        { error: `Invalid plan: ${plan}` },
-        { status: 400 }
+        { error: "Unauthorized" },
+        { status: 401 }
       );
     }
 
-    // Enterprise → no automated checkout
-    if (plan === "enterprise") {
-      return NextResponse.json({
-        url: `${process.env.APP_URL}/contact/sales?org=${orgId}`,
-      });
-    }
-
+    // ============================
+    // ⭐ Stripe client
+    // ============================
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    // Create Stripe Checkout Session
+    // ============================
+    // ⭐ Plan price ID mapping
+    // ============================
+    const PRICE_IDS = {
+      developer: process.env.STRIPE_PRICE_DEVELOPER!,
+      startup: process.env.STRIPE_PRICE_STARTUP!,
+      team: process.env.STRIPE_PRICE_TEAM!,
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE!, // custom contracts supported
+    };
+
+    const priceId = PRICE_IDS[plan as keyof typeof PRICE_IDS];
+
+    if (!priceId) {
+      return NextResponse.json(
+        { error: "Invalid plan" },
+        { status: 400 }
+      );
+    }
+
+    // ===================================================================
+    // ⭐ If enterprise → redirect to sales form instead of billing flow
+    // ===================================================================
+    if (plan === "enterprise") {
+      return NextResponse.json({
+        url: `${process.env.APP_URL}/contact-sales`,
+      });
+    }
+
+    // ===================================================================
+    // ⭐ Create Stripe customer if not exists
+    // ===================================================================
+    let customerId = user.app_metadata?.stripe_customer_id;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email!,
+        metadata: {
+          userId: user.id,
+        },
+      });
+
+      customerId = customer.id;
+
+      // Save customer ID in Supabase
+      await supabase.auth.admin.updateUserById(user.id, {
+        app_metadata: {
+          stripe_customer_id: customerId,
+        },
+      });
+    }
+
+    // ===================================================================
+    // ⭐ Seat quantity handling (Developer/Startup/Team)
+    // ===================================================================
+    const qty = seats ? Number(seats) : 1;
+
+    // ===================================================================
+    // ⭐ Create Checkout Session
+    // ===================================================================
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-
-      // Until email is known at login-time, leave blank
-      customer_email: "",
-
-      metadata: {
-        userId,
-        orgId,
-        plan,
-      },
-
+      customer: customerId,
       line_items: [
         {
-          price_data: {
-            currency: "usd",
-            recurring: {
-              interval: "month",
-            },
-            unit_amount: selected.price * 100, // convert to cents
-            product_data: {
-              name: selected.name,
-              description: `${selected.providers} providers • ${selected.updates} updates`,
-            },
-          },
-          quantity: 1,
+          price: priceId,
+          quantity: qty,
         },
       ],
-
-      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
+      metadata: {
+        userId: user.id,
+        plan: plan,
+        seats: qty,
+      },
+      subscription_data: {
+        metadata: {
+          userId: user.id,
+          plan,
+          seats: qty,
+        },
+      },
+      success_url: `${process.env.APP_URL}/dashboard/billing?status=success`,
+      cancel_url: `${process.env.APP_URL}/dashboard/billing?status=cancelled`,
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error: any) {
-    console.error("Stripe checkout error:", error);
+  } catch (err: any) {
+    console.error("Stripe Checkout Error:", err);
     return NextResponse.json(
-      { error: error.message },
+      { error: err.message ?? "Internal error" },
       { status: 500 }
     );
   }
