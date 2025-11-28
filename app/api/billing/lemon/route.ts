@@ -1,24 +1,25 @@
-// app/api/billing/lemon/route.ts
-
 import { NextResponse } from "next/server";
+import pricing from "@/marketing/pricing.json";
+import { updateUserFromLemonEvent } from "@/server/billing/lemon-sync";
+import { sendReceipt } from "@/server/email/send-receipt";
 
 export async function POST(req: Request) {
-  const secret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET!;
-  const body = await req.text();
-  const signature = req.headers.get("x-signature")!;
+  const body = await req.json();
 
-  const crypto = await import("crypto");
-  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
-
-  if (signature !== expected) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  if (!body?.data?.attributes) {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const event = JSON.parse(body);
+  const event = body.data.attributes;
+  const plan = event.custom_data?.plan;
+  const email = event.customer_email;
 
-  console.log("🍋 Lemon webhook received:", event.meta.event_name);
+  if (event.event_name === "order_created") {
+    await updateUserFromLemonEvent(event);
 
-  // TODO: Write metadata to Supabase
+    const planMeta = pricing.plans.find((p) => p.id === plan);
+    await sendReceipt(email, planMeta?.name, planMeta?.seats_included, planMeta?.price);
+  }
 
   return NextResponse.json({ received: true });
 }
