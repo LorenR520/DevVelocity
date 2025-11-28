@@ -1,119 +1,180 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function NewFilePage() {
+  const [plan, setPlan] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [type, setType] = useState("ai_output");
+  const [category, setCategory] = useState("cloud-init");
   const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function saveFile() {
-    setLoading(true);
-    setSaved(false);
-    setError("");
-
-    try {
-      const res = await fetch("/api/files/save", {
-        method: "POST",
-        body: JSON.stringify({ name, type, content }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
+  // ----------------------------------------------------
+  // 🔐 PLAN CHECK — Developer gets upgrade modal
+  // ----------------------------------------------------
+  useEffect(() => {
+    async function loadPlan() {
+      const res = await fetch("/api/user/plan");
       const json = await res.json();
+      setPlan(json.plan);
 
-      if (json.error) {
-        setError(json.error);
-      } else {
-        setSaved(true);
-        setName("");
-        setContent("");
+      if (json.plan === "developer") {
+        setShowUpgradeModal(true);
       }
-    } catch (err: any) {
-      setError(err.message || "Error saving file.");
     }
+    loadPlan();
+  }, []);
 
-    setLoading(false);
+  // Developer tier → Block entire page
+  if (plan === "developer") {
+    return (
+      <>
+        <UpgradeModal />
+        <main className="max-w-3xl mx-auto px-6 py-16 text-white">
+          <h1 className="text-3xl font-bold mb-4">Save File</h1>
+          <p className="text-gray-400">
+            File saving is only available on the Startup plan and above.
+          </p>
+        </main>
+      </>
+    );
   }
 
+  // ----------------------------------------------------
+  // Upgrade modal component
+  // ----------------------------------------------------
+  function UpgradeModal() {
+    if (!showUpgradeModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 max-w-md text-white">
+          <h2 className="text-2xl font-bold mb-4">Upgrade Required</h2>
+
+          <p className="text-gray-300 mb-6">
+            The File Portal is only available on{" "}
+            <span className="font-semibold text-blue-400">Startup, Team,</span>{" "}
+            and{" "}
+            <span className="font-semibold text-blue-400">Enterprise plans</span>.
+          </p>
+
+          <a
+            href="/dashboard/billing/upgrade"
+            className="block w-full py-3 text-center bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+          >
+            Upgrade Plan
+          </a>
+
+          <button
+            onClick={() => setShowUpgradeModal(false)}
+            className="mt-4 text-gray-400 hover:text-gray-200 text-sm"
+          >
+            Continue without access
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------------------------------------------
+  // 🧾 Save file handler
+  // ----------------------------------------------------
+  async function saveFile() {
+    setSaving(true);
+    setError(null);
+
+    const res = await fetch("/api/files/save", {
+      method: "POST",
+      body: JSON.stringify({ name, category, content }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const json = await res.json();
+
+    if (json.error) {
+      setError(json.error);
+      setSaving(false);
+      return;
+    }
+
+    // Redirect back to list
+    window.location.href = "/dashboard/files";
+  }
+
+  // ----------------------------------------------------
+  // Render main page UI
+  // ----------------------------------------------------
   return (
     <main className="max-w-3xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-8">Save New Build</h1>
+      <h1 className="text-3xl font-bold mb-8">Save File</h1>
 
-      <div className="space-y-6">
+      {/* Upgrade modal if needed */}
+      <UpgradeModal />
 
-        {/* FILE NAME */}
+      <div className="space-y-6 bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+        {/* Name */}
         <div>
           <label className="block text-gray-300 mb-2 font-medium">
             File Name
           </label>
           <input
+            type="text"
+            className="bg-neutral-950 border border-neutral-800 px-4 py-2 rounded-lg w-full text-white"
+            placeholder="ex: my-cloud-init.yaml"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg"
-            placeholder="ex: Production Cloud-init (Oracle)"
           />
         </div>
 
-        {/* FILE TYPE */}
+        {/* Category */}
         <div>
           <label className="block text-gray-300 mb-2 font-medium">
-            File Type
+            Category
           </label>
-
           <select
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg"
+            className="bg-neutral-950 border border-neutral-800 px-4 py-2 rounded-lg w-full text-white"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
           >
-            <option value="ai_output">AI Output</option>
-            <option value="cloud_init">Cloud-init</option>
+            <option value="cloud-init">Cloud Init</option>
             <option value="docker">Docker</option>
             <option value="pipeline">Pipeline</option>
-            <option value="template">Template</option>
-            <option value="notes">Notes</option>
+            <option value="automation">Automation</option>
+            <option value="config">Configuration</option>
+            <option value="other">Other</option>
           </select>
         </div>
 
-        {/* FILE CONTENT */}
+        {/* Content */}
         <div>
           <label className="block text-gray-300 mb-2 font-medium">
-            Content
+            File Content
           </label>
-
           <textarea
+            className="bg-neutral-950 border border-neutral-800 px-4 py-3 rounded-lg w-full h-64 text-white font-mono"
+            placeholder="Paste your cloud-init, docker-compose, or pipeline code here..."
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            className="w-full min-h-[250px] bg-neutral-900 border border-neutral-800 p-4 rounded-lg"
-            placeholder="Paste your AI plan, cloud-init, YAML, docker-compose, or JSON here..."
           />
         </div>
 
-        {/* SAVE BUTTON */}
-        <button
-          onClick={saveFile}
-          disabled={loading}
-          className="py-3 px-8 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
-        >
-          {loading ? "Saving..." : "Save File"}
-        </button>
-
-        {/* RESULT STATES */}
-        {saved && (
-          <p className="text-green-400 text-sm mt-2">
-            File saved successfully!
-          </p>
-        )}
-
+        {/* Error message */}
         {error && (
-          <p className="text-red-400 text-sm mt-2">
+          <p className="text-red-400 text-sm">
             {error}
           </p>
         )}
+
+        {/* Submit */}
+        <button
+          disabled={saving}
+          onClick={saveFile}
+          className="py-3 px-6 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        >
+          {saving ? "Saving..." : "Save File"}
+        </button>
       </div>
     </main>
   );
