@@ -1,47 +1,37 @@
 // app/api/billing/stripe/route.ts
-//
-// ⭐ Stripe Webhook Handler
-// Handles:
-// - invoice.paid
-// - customer.subscription.updated
-// - customer.subscription.deleted
-// - checkout.session.completed
-// - invoice.payment_failed
-//
-// Syncs billing → Supabase
-// Creates internal usage/seat billing events
-// Updates plan, cycle start, and status
-//
-
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import pricing from "@/marketing/pricing.json";
 
-// Stripe requires the raw body:
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: false, // Stripe requires the raw body
   },
 };
 
-export async function POST(req: Request) {
-  let body: any;
-  let signature: string | null = null;
+async function buffer(readable: ReadableStream<Uint8Array>) {
+  const reader = readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let done, value;
 
-  try {
-    signature = req.headers.get("stripe-signature");
-    body = await req.text();
-  } catch (err) {
-    console.error("Failed to read raw body:", err);
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  while (true) {
+    ({ done, value } = await reader.read());
+    if (done) break;
+    if (value) chunks.push(value);
   }
+
+  return Buffer.concat(chunks);
+}
+
+export async function POST(req: Request) {
+  const body = await buffer(req.body!);
+  const signature = req.headers.get("Stripe-Signature");
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
     apiVersion: "2023-10-16",
   });
 
-  let event: Stripe.Event;
+  let event;
 
   try {
     event = stripe.webhooks.constructEvent(
@@ -50,108 +40,64 @@ export async function POST(req: Request) {
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
-    console.error("Webhook signature error:", err.message);
-    return NextResponse.json({ error: "Signature error" }, { status: 400 });
+    console.error("❌ Stripe webhook signature error:", err.message);
+    return new Response(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
+  // Supabase Admin
   const supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // ---------------------------------------
-  // ⭐ EVENT HANDLERS
-  // ---------------------------------------
-
+  // ----------------------------------------------------
+  // ⭐ Stripe Event Handling
+  // ----------------------------------------------------
   switch (event.type) {
-    // Fired after checkout success
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const customer = session.customer as string;
-      const userId = session.metadata?.userId;
-      const plan = session.metadata?.plan;
-
-      if (!userId || !plan) break;
-
-      // Save plan metadata
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "stripe",
-          plan,
-          billing_customer_id: customer,
-        },
-      });
-
-      break;
-    }
-
-    // Fired each billing cycle when invoice is paid
-    case "invoice.paid": {
-      const invoice = event.data.object as Stripe.Invoice;
-
-      const customer = invoice.customer as any;
-      const userId =
-        customer?.metadata?.userId ?? invoice.metadata?.userId;
-
-      if (!userId) break;
-
-      const amount = invoice.amount_paid / 100;
-
-      // Insert internal billing event record
-      await supabase.from("billing_events").insert({
-        user_id: userId,
-        provider: "stripe",
-        type: "invoice_paid",
-        amount,
-        date: new Date().toISOString(),
-        invoice_id: invoice.id,
-        details: {
-          items: invoice.lines.data.map((l) => ({
-            description: l.description,
-            amount: l.amount / 100,
-          })),
-        },
-      });
-
-      break;
-    }
-
-    // Fired when subscription changes (plan change, renewal)
+    case "customer.subscription.created":
     case "customer.subscription.updated": {
-      const sub = event.data.object as Stripe.Subscription;
-      const customer = sub.customer as any;
-
-      const userId = customer?.metadata?.userId;
-      const plan = sub.items.data[0].price.id;
-
-      if (!userId || !plan) break;
-
-      // Lookup readable plan via price → plan.id mapping
-      let matchedPlan = pricing.plans.find(
-        (p) => p.stripe_price_id === plan
-      );
-
-      const readablePlanId = matchedPlan?.id ?? "unknown";
+      const subscription = event.data.object as Stripe.Subscription;
+      const priceId = subscription.items.data[0].price.id;
+      const userId = subscription.metadata.user_id;
 
       await supabase.auth.admin.updateUserById(userId, {
         app_metadata: {
           billing_provider: "stripe",
-          plan: readablePlanId,
-          status: sub.status,
+          plan: priceId,
+          status: subscription.status,
+          current_period_end: subscription.current_period_end,
         },
       });
 
+      console.log("🔄 Updated subscription for user", userId);
       break;
     }
 
-    // Fired if subscription is canceled
+    case "invoice.payment_succeeded": {
+      const invoice = event.data.object as Stripe.Invoice;
+      const userId = invoice.metadata.user_id;
+
+      // Insert internal invoice record
+      await supabase.from("billing_events").insert({
+        org_id: invoice.metadata.org_id ?? null,
+        type: "stripe_invoice",
+        amount: invoice.amount_paid / 100,
+        currency: invoice.currency,
+        details: invoice.lines.data.map((l) => ({
+          description: l.description,
+          amount: l.amount / 100,
+          quantity: l.quantity,
+        })),
+      });
+
+      console.log("💰 Stripe invoice recorded:", invoice.id);
+      break;
+    }
+
     case "customer.subscription.deleted": {
-      const sub = event.data.object as Stripe.Subscription;
-      const customer = sub.customer as any;
-
-      const userId = customer?.metadata?.userId;
-
-      if (!userId) break;
+      const subscription = event.data.object as Stripe.Subscription;
+      const priceId = subscription.items.data[0].price.id;
+      const userId = subscription.metadata.user_id;
 
       await supabase.auth.admin.updateUserById(userId, {
         app_metadata: {
@@ -161,33 +107,12 @@ export async function POST(req: Request) {
         },
       });
 
-      break;
-    }
-
-    // Payment failure
-    case "invoice.payment_failed": {
-      const invoice = event.data.object as Stripe.Invoice;
-      const customer = invoice.customer as any;
-
-      const userId = customer?.metadata?.userId;
-
-      if (!userId) break;
-
-      await supabase.from("billing_events").insert({
-        user_id: userId,
-        provider: "stripe",
-        type: "payment_failed",
-        amount: 0,
-        details: {
-          reason: invoice.collection_method,
-        },
-      });
-
+      console.log("❌ Subscription canceled:", userId);
       break;
     }
 
     default:
-      console.log(`Unhandled Stripe event: ${event.type}`);
+      console.log(`⚠️ Unhandled Stripe event: ${event.type}`);
   }
 
   return NextResponse.json({ received: true });
