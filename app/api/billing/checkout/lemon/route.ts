@@ -1,89 +1,69 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { plan } = await req.json();
+    const { planId, seats, orgId } = await req.json();
 
-    if (!plan) {
+    if (!planId) {
       return NextResponse.json(
-        { error: "Missing plan" },
+        { error: "Missing planId" },
         { status: 400 }
       );
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const planMap: Record<string, string> = {
+    const variantMap = {
       developer: process.env.LEMON_VARIANT_DEVELOPER!,
       startup: process.env.LEMON_VARIANT_STARTUP!,
       team: process.env.LEMON_VARIANT_TEAM!,
-      enterprise: process.env.LEMON_VARIANT_ENTERPRIS!,
+      enterprise: process.env.LEMON_VARIANT_ENTERPRISE!,
     };
 
-    const variantId = planMap[plan];
+    const variantId = variantMap[planId];
 
     if (!variantId) {
       return NextResponse.json(
-        { error: "Invalid plan selected" },
+        { error: "Invalid planId" },
         { status: 400 }
       );
     }
 
-    // -------------------------------
-    // ⭐ CREATE LEMON CHECKOUT SESSION
-    // -------------------------------
-    const res = await fetch(
-      process.env.LEMON_CHECKOUT_URL_BASE!,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-          "Content-Type": "application/json",
-          Accept: "application/vnd.api+json",
-        },
-        body: JSON.stringify({
-          data: {
-            type: "checkouts",
-            attributes: {
-              checkout_data: {
-                email: user.email,
-              },
-              product_options: {
-                enabled_variants: [variantId],
-              },
-              product: process.env.LEMON_STORE_ID!,
+    // Base Lemon checkout URL
+    const url = "https://api.lemonsqueezy.com/v1/checkouts";
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/vnd.api+json",
+      },
+      body: JSON.stringify({
+        data: {
+          type: "checkouts",
+          attributes: {
+            custom_redirect_urls: {
+              success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
+              cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
+            },
+            checkout_data: {
+              variant_id: variantId,
               custom: {
-                user_id: user.id,
-                plan,
+                org_id: orgId ?? "",
+                seats: seats ?? 1,
+                plan_id: planId,
               },
-              redirect_url: `${process.env.APP_URL}/dashboard/billing`,
             },
           },
-        }),
-      }
-    );
+        },
+      }),
+    });
 
     const json = await res.json();
 
     if (!json?.data?.attributes?.url) {
-      console.error("Lemon checkout error:", json);
+      console.error("Lemon JSON:", json);
       return NextResponse.json(
-        { error: "Failed to create Lemon checkout" },
+        { error: "Failed to generate checkout URL" },
         { status: 500 }
       );
     }
@@ -92,11 +72,9 @@ export async function POST(req: Request) {
       url: json.data.attributes.url,
     });
   } catch (err: any) {
-    console.error("Lemon Checkout ERROR:", err);
+    console.error("Lemon checkout error:", err);
     return NextResponse.json(
-      {
-        error: err.message || "Internal Server Error",
-      },
+      { error: err.message ?? "Server error" },
       { status: 500 }
     );
   }
