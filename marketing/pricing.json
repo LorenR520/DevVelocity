@@ -3,58 +3,100 @@
     {
       "id": "developer",
       "name": "Developer",
+      "display_price": "$39",
       "price": 39,
-      "display_price": "$39/mo",
+      "providers": 1,
+      "updates": "monthly",
+      "builder": "basic",
       "sso": "none",
       "seats_included": 1,
       "seat_price": 5,
+
       "limits": {
-        "build_minutes": 300,
+        "build_minutes": 500,
         "pipelines": 50,
         "api_calls": 10000
+      },
+
+      "metered": {
+        "build_minute_price": 0.03,
+        "pipeline_price": 0.20,
+        "api_call_price": 0.0002
       }
     },
+
     {
       "id": "startup",
       "name": "Startup",
+      "display_price": "$99",
       "price": 99,
-      "display_price": "$99/mo",
+      "providers": 3,
+      "updates": "weekly",
+      "builder": "advanced",
       "sso": "basic",
       "seats_included": 3,
-      "seat_price": 12,
+      "seat_price": 7,
+
       "limits": {
-        "build_minutes": 1500,
-        "pipelines": 300,
-        "api_calls": 80000
+        "build_minutes": 2000,
+        "pipelines": 200,
+        "api_calls": 50000
+      },
+
+      "metered": {
+        "build_minute_price": 0.02,
+        "pipeline_price": 0.15,
+        "api_call_price": 0.00015
       }
     },
+
     {
       "id": "team",
       "name": "Team",
+      "display_price": "$299",
       "price": 299,
-      "display_price": "$299/mo",
+      "providers": 7,
+      "updates": "daily",
+      "builder": "enterprise",
       "sso": "advanced",
       "seats_included": 10,
-      "seat_price": 18,
+      "seat_price": 9,
+
       "limits": {
-        "build_minutes": 5000,
-        "pipelines": 800,
-        "api_calls": 250000
+        "build_minutes": 10000,
+        "pipelines": 500,
+        "api_calls": 150000
+      },
+
+      "metered": {
+        "build_minute_price": 0.015,
+        "pipeline_price": 0.10,
+        "api_call_price": 0.0001
       }
     },
+
     {
       "id": "enterprise",
       "name": "Enterprise",
-      "price": 1250,
       "display_price": "$1250+",
-      "sso": "gov/enterprise",
-      "custom_pricing": true,
+      "price": 1250,
+      "providers": "unlimited",
+      "updates": "continuous",
+      "builder": "private",
+      "sso": "enterprise",
       "seats_included": "custom",
       "seat_price": "custom",
+
       "limits": {
         "build_minutes": "custom",
         "pipelines": "custom",
         "api_calls": "custom"
+      },
+
+      "metered": {
+        "build_minute_price": "custom",
+        "pipeline_price": "custom",
+        "api_call_price": "custom"
       }
     }
   ]
