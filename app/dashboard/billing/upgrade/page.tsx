@@ -6,47 +6,56 @@ import pricing from "@/marketing/pricing.json";
 
 export default function UpgradePage() {
   const [currentPlan, setCurrentPlan] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
-      const res = await fetch("/api/billing/summary", { cache: "no-store" });
-      const json = await res.json();
-      setCurrentPlan(json.plan?.id || null);
+    async function loadCurrentPlan() {
+      try {
+        const res = await fetch("/api/user/plan");
+        const data = await res.json();
+        setCurrentPlan(data.plan_id || null);
+      } catch (error) {
+        console.error("Error loading current plan:", error);
+      }
+      setLoading(false);
     }
-    load();
+    loadCurrentPlan();
   }, []);
 
-  if (!pricing?.plans) {
+  if (loading) {
     return (
-      <div className="text-center text-gray-400 py-20">
-        Loading pricing...
-      </div>
+      <main className="max-w-4xl mx-auto px-6 py-20 text-center text-white">
+        Loading your plan...
+      </main>
     );
   }
 
-  // Decorate plans with CTA and badges
-  const decoratedPlans = pricing.plans.map((p) => {
-    const isCurrent = currentPlan === p.id;
-
-    return {
-      ...p,
-      cta: isCurrent ? "Current Plan" : "Upgrade",
-      href: isCurrent
+  // Add highlight to most popular plan
+  const plans = pricing.plans.map((p) => ({
+    ...p,
+    badge: p.id === "startup" ? "Most Popular" : undefined,
+    cta:
+      currentPlan === p.id
+        ? "Current Plan"
+        : currentPlan
+        ? "Upgrade / Downgrade"
+        : "Choose Plan",
+    href:
+      currentPlan === p.id
         ? "#"
-        : `/api/billing/checkout/lemon?plan=${p.id}`, // default checkout
-      badge: p.id === "startup" ? "Most Popular" : undefined,
-    };
-  });
+        : `/api/billing/checkout?plan=${p.id}`,
+  }));
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-10">Upgrade Plan</h1>
+      <h1 className="text-3xl font-bold mb-8">Upgrade Plan</h1>
 
-      <p className="text-gray-300 mb-8">
-        Choose the plan that fits your scale. All upgrades apply instantly.
+      <p className="text-gray-300 mb-10">
+        Select a new plan below. Upgrades apply immediately.  
+        Downgrades apply at next billing cycle.
       </p>
 
-      <PricingTable plans={decoratedPlans} />
+      <PricingTable plans={plans} />
     </main>
   );
 }
