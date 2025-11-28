@@ -1,16 +1,14 @@
 /**
- * DevVelocity AI Builder — Master Prompt
+ * DevVelocity AI Builder — Tier-Aware Prompt Generator
  *
- * This is the system-level prompt that generates:
- *  - infra architecture
- *  - cloud-init
- *  - docker-compose
- *  - pipelines
- *  - automation
- *  - SSO/security
- *  - budget breakdown
- *  - maintenance recommendations
- *  - upgrade suggestions
+ * Features:
+ * ✔ Tier-based limits (providers, automation level, security level)
+ * ✔ Auto-limits user choices when exceeding tier
+ * ✔ Friendly + professional upgrade recommendations
+ * ✔ Validated, structured prompt output
+ * ✔ Cloud-aware architecture instructions
+ * ✔ Automation-aware pipelines
+ * ✔ CI/CD + cloud-init + docker output
  */
 
 export function buildAIPrompt(answers: Record<number, any>) {
@@ -25,10 +23,9 @@ export function buildAIPrompt(answers: Record<number, any>) {
     7: project,
   } = answers;
 
-  // -------------------------------------------
-  // 🧠 Tier-based Constraints & Feature Gating
-  // -------------------------------------------
-
+  // ---------------------------------------------------------
+  // 🎚 PLAN + TIER RULES
+  // ---------------------------------------------------------
   const plan = answers?.plan ?? "developer";
 
   const planCaps: any = {
@@ -38,172 +35,152 @@ export function buildAIPrompt(answers: Record<number, any>) {
       security: "none",
       ai_model: "small",
       access: ["cloud-init", "basic pipelines"],
-      sso: false,
-      upgrade: "startup",
+      badge: "Developer Tier",
     },
-
     startup: {
       providers: 3,
       automation: "advanced",
       security: "basic",
       ai_model: "medium",
       access: ["cloud-init", "docker", "pipelines"],
-      sso: true,
-      upgrade: "team",
+      badge: "Startup Tier",
     },
-
     team: {
       providers: 7,
       automation: "enterprise",
       security: "advanced",
       ai_model: "large",
-      access: ["all templates", "advanced sso"],
-      sso: true,
-      upgrade: "enterprise",
+      access: ["all templates", "sso options"],
+      badge: "Team Tier",
     },
-
     enterprise: {
       providers: "unlimited",
       automation: "private",
       security: "enterprise",
       ai_model: "max",
       access: ["everything"],
-      sso: true,
+      badge: "Enterprise Tier",
     },
   };
 
   const caps = planCaps[plan];
 
-  // -------------------------------------------
-  // 🧩 Provider Limits
-  // -------------------------------------------
+  // ---------------------------------------------------------
+  // 🛑 PROVIDER LIMIT LOGIC + UPGRADE PROMPTS
+  // ---------------------------------------------------------
+  let validatedProviders = providers || [];
+  let providerWarning = "";
 
-  let validatedProviders = providers;
+  if (caps.providers !== "unlimited" && validatedProviders.length > caps.providers) {
+    providerWarning = `
+Your plan (${caps.badge}) allows **${caps.providers} provider(s)**.
+You selected **${validatedProviders.length}**.
 
-  if (caps.providers !== "unlimited") {
-    if (providers?.length > caps.providers) {
-      validatedProviders = providers.slice(0, caps.providers);
-    }
+👉 I will automatically limit this to **${caps.providers}** to stay within your plan.
+👉 Upgrade any time to unlock **full multi-cloud support**.
+`;
+
+    validatedProviders = validatedProviders.slice(0, caps.providers);
   }
 
-  // -------------------------------------------
-  // 🧩 Automation Limits
-  // -------------------------------------------
-
+  // ---------------------------------------------------------
+  // 🛑 AUTOMATION LIMIT (basic/advanced/enterprise/private)
+  // ---------------------------------------------------------
+  let automationWarning = "";
   const canUseAdvanced =
-    caps.automation === "advanced" ||
-    caps.automation === "enterprise" ||
-    caps.automation === "private";
+    ["advanced", "enterprise", "private"].includes(caps.automation);
 
   const automationMode = canUseAdvanced ? automation : "basic";
 
-  // -------------------------------------------
-  // 🧩 Security Limits
-  // -------------------------------------------
+  if (!canUseAdvanced && automation !== "basic") {
+    automationWarning = `
+Your plan (${caps.badge}) includes **Basic Automation**.
 
+👉 Advanced pipelines, multi-stage CI/CD, and integration workflows  
+require an upgrade to **Startup, Team, or Enterprise**.
+
+I'll continue using **Basic Automation** for now.
+`;
+  }
+
+  // ---------------------------------------------------------
+  // 🛑 SECURITY / SSO LIMIT
+  // ---------------------------------------------------------
+  let securityWarning = "";
   const allowedSecurity = caps.security;
 
-  // -------------------------------------------
-  // 🧩 Upgrade Suggestions (Brain Layer)
-  // -------------------------------------------
+  if (security !== allowedSecurity && allowedSecurity !== "enterprise") {
+    securityWarning = `
+Your plan (${caps.badge}) includes **${allowedSecurity} security level**.
 
-  const upgradeHints = [];
+👉 Advanced SSO, identity federation, or private tenant security  
+requires **Team or Enterprise**.
 
-  if (providers?.length > caps.providers && caps.providers !== "unlimited") {
-    upgradeHints.push(
-      `You selected ${providers.length} cloud providers, but your plan only allows ${caps.providers}. Upgrade to ${caps.upgrade} to unlock more providers.`
-    );
+I'll restrict security recommendations to **${allowedSecurity}** level.
+`;
   }
 
-  if (automation !== "basic" && caps.automation === "basic") {
-    upgradeHints.push(
-      `Advanced automation is restricted on the ${plan} plan. Upgrade to ${caps.upgrade} for enterprise-grade automation.`
-    );
-  }
-
-  if (security !== allowedSecurity) {
-    upgradeHints.push(
-      `Requested security level (${security}) is above your plan’s allowed level (${allowedSecurity}). Upgrade to ${caps.upgrade} for additional security models.`
-    );
-  }
-
-  if (!caps.sso && security?.includes("sso")) {
-    upgradeHints.push(
-      `SSO is unavailable on the ${plan} plan. Upgrade to Startup or higher to unlock SSO.`
-    );
-  }
-
-  if (budget < 20 && plan !== "developer") {
-    upgradeHints.push(
-      `Your budget is too low for the selected plan. Consider Developer, or increase budget for better infra.`
-    );
-  }
-
-  // -------------------------------------------
-  // 🧠 Final System Prompt
-  // -------------------------------------------
-
+  // ---------------------------------------------------------
+  // 📝 COMPLETE AI PROMPT (this powers the AI Builder)
+  // ---------------------------------------------------------
   return `
-You are DevVelocity AI — an elite DevOps architect specializing in:
+You are **DevVelocity AI** — a world-class DevOps architect specializing in:
 
-- Multi-cloud infrastructure
-- High-uptime architectures
-- Automated pipelines
-- Cloud-init provisioning
-- Docker orchestration
-- Serverless & VM hybrid deployments
-- Cost optimization
-- Security + SSO strategies
-- Tier-limited feature generation
-- Smart upsells that increase revenue
-
-You must generate a complete, production-ready DevOps plan based on the user’s responses AND their subscription tier.
-
-You must apply ALL tier restrictions AND produce upgrade suggestions where appropriate.
+• Cloud infrastructure design  
+• Managed service selection  
+• CI/CD automation  
+• cloud-init generation  
+• Docker + NGINX stacks  
+• Security architecture  
+• Multi-cloud decision-making  
+• Provider best practices  
+• Tier-aware SaaS feature gating  
+• Budget-optimized deployment planning  
 
 ---
 
-# USER INPUT (Tier-Validated)
+# VALIDATED USER INPUT
 
-Cloud Provider Preference:
+## Cloud Provider Preference  
 ${cloud}
 
-Automation Goals (tier-adjusted):
+## User Automation Goals (tier-limited)  
 ${automationMode}
 
-Selected Providers (validated):
+${automationWarning}
+
+## Selected Cloud Providers (validated)  
 ${JSON.stringify(validatedProviders, null, 2)}
 
-Maintenance Preference:
+${providerWarning}
+
+## Maintenance Preference  
 ${maintenance}
 
-Budget:
+## Monthly Budget  
 ${budget}
 
-Security Requirements:
-Requested: ${security}
-Allowed by Tier: ${allowedSecurity}
+## Security Requirements (validated)  
+Requested: ${security}  
+Allowed: ${allowedSecurity}  
+${securityWarning}
 
-Workload Type:
+## Build Type  
 ${buildType}
 
-Project Description:
+## Project Description  
 ${project}
 
-Plan Tier:
-${plan}
+## User Plan  
+${plan} (${caps.badge})
 
-Tier Feature Caps (Hard Enforced):
+## Feature Caps  
 ${JSON.stringify(caps, null, 2)}
-
-Upgrade Suggestions (Generate More Based on Output Needs):
-${upgradeHints.join("\n")}
 
 ---
 
-# REQUIRED OUTPUT FORMAT (JSON)
-
-Respond EXACTLY in this format:
+# REQUIRED OUTPUT FORMAT
+Respond with **valid JSON**:
 
 {
   "summary": "...",
@@ -215,10 +192,10 @@ Respond EXACTLY in this format:
     "automation": "..."
   },
   "maintenance_plan": "...",
-  "sso_recommendations": "...",
   "security_model": "...",
+  "sso_recommendations": "...",
   "budget_projection": "...",
-  "upgrade_paths": "...",
+  "upgrade_recommendations": "...",
   "next_steps": "..."
 }
 
@@ -226,16 +203,16 @@ Respond EXACTLY in this format:
 
 # RULES
 
-1. **NEVER generate features the user’s plan does not allow.**
-2. **ALWAYS recommend an upgrade if their needs exceed their plan.**
-3. **ALWAYS generate runnable code with no placeholders.**
-4. **ALWAYS optimize for chosen cloud provider.**
-5. **ALWAYS consider automation goals + maintenance level.**
-6. **ALWAYS provide security model appropriate to tier.**
-7. **ALWAYS produce a complete deployment-ready solution.**
+1. Always stay within the user's plan limits.  
+2. If a feature is above their tier, **recommend an upgrade** — but continue with limited output.  
+3. Always generate runnable cloud-init / Docker / pipeline code.  
+4. Optimize plans based on cloud provider preference.  
+5. For enterprise tier, unlock **everything** (no limits).  
+6. Mention limitations only when necessary.  
+7. Be helpful, friendly, and professional.  
 
 ---
 
-# BEGIN OUTPUT NOW
-`;
+# BEGIN OUTPUT (JSON ONLY)
+  `;
 }
