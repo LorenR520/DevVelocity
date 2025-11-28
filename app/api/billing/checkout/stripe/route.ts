@@ -2,97 +2,117 @@
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import pricing from "@/marketing/pricing.json";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { plan, userId, email } = await req.json();
+    const { plan } = await req.json();
 
-    if (!plan || !userId) {
+    if (!plan) {
       return NextResponse.json(
-        { error: "Missing plan or userId" },
+        { error: "Missing plan" },
         { status: 400 }
       );
     }
 
-    // Match plan from pricing.json
-    const selectedPlan = pricing.plans.find((p: any) => p.id === plan);
+    // Map plans → Stripe Price IDs
+    const planToPrice: Record<string, string> = {
+      developer: process.env.STRIPE_PRICE_DEVELOPER!,
+      startup: process.env.STRIPE_PRICE_STARTUP!,
+      team: process.env.STRIPE_PRICE_TEAM!,
+      enterprise: process.env.STRIPE_PRICE_ENTERPRISE!, // can be $1250 or custom quote
+    };
 
-    if (!selectedPlan) {
+    const priceId = planToPrice[plan];
+
+    if (!priceId) {
       return NextResponse.json(
-        { error: "Invalid plan" },
+        { error: "Invalid or unmapped plan" },
         { status: 400 }
       );
     }
 
-    // Stripe SDK initialization
+    // --------------------------------------------
+    // ⭐ Load SUPABASE session to identify the user
+    // --------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    const token = req.headers
+      .get("Authorization")
+      ?.replace("Bearer ", "");
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Missing Bearer token" },
+        { status: 401 }
+      );
+    }
+
+    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+
+    if (userErr || !userData?.user) {
+      return NextResponse.json(
+        { error: "Invalid or expired session" },
+        { status: 401 }
+      );
+    }
+
+    const user = userData.user;
+
+    // --------------------------------------------
+    // ⭐ Create Stripe Checkout Session
+    // --------------------------------------------
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    // Create or reuse Stripe customer
-    const customer = await stripe.customers.create({
-      email: email ?? undefined,
-      metadata: {
-        userId,
-        plan,
-      },
-    });
-
-    // Create the Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customer.id,
-      success_url: `${process.env.PUBLIC_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.PUBLIC_URL}/dashboard/billing?canceled=1`,
+      payment_method_types: ["card"],
+      customer_email: user.email,
+
       line_items: [
         {
-          price_data: {
-            currency: "usd",
-            unit_amount: selectedPlan.price * 100,
-            product_data: {
-              name: `${selectedPlan.name} Plan`,
-              metadata: {
-                plan,
-                builders: selectedPlan.builder,
-                sso: selectedPlan.sso,
-              },
-            },
-            recurring: {
-              interval: "month",
-            },
-          },
+          price: priceId,
           quantity: 1,
         },
       ],
 
       metadata: {
-        userId,
+        user_id: user.id,
         plan,
+        source: "devvelocity-app",
       },
 
       subscription_data: {
         metadata: {
-          userId,
+          user_id: user.id,
           plan,
         },
       },
+
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=1`,
     });
 
-    if (!session?.url) {
+    if (!session.url) {
       return NextResponse.json(
-        { error: "Failed to create Stripe checkout session" },
+        { error: "Checkout URL missing" },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
+      ok: true,
       url: session.url,
     });
   } catch (err: any) {
-    console.error("Stripe checkout error:", err);
+    console.error("Stripe Checkout Error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Stripe checkout failed" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
