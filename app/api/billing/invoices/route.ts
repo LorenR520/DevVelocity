@@ -1,154 +1,159 @@
 // app/api/billing/invoices/route.ts
+//
+// Returns ALL invoices across:
+// ⭐ Stripe
+// ⭐ Lemon Squeezy
+// ⭐ Internal Billing Events (usage + seats)
+// 
+// Output format matches:
+// /dashboard/billing/invoices UI
+//
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    // ----------------------------
-    // ⭐ Init Supabase Admin
-    // ----------------------------
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
 
-    // ----------------------------
-    // ⭐ Get user
-    // ----------------------------
-    const { data: auth } = await supabase.auth.getUser();
-    const user = auth.user;
+    // ---------------------------------------------
+    // ⭐ Get authenticated user from JWT header
+    // ---------------------------------------------
+    const authHeader = req.headers.get("Authorization");
+    const token = authHeader?.replace("Bearer ", "");
 
-    if (!user) {
-      return NextResponse.json({ invoices: [] });
+    if (!token) {
+      return NextResponse.json(
+        { error: "Missing auth token" },
+        { status: 401 }
+      );
     }
 
-    // ----------------------------
-    // ⭐ Find user's organization
-    // ----------------------------
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("id")
-      .eq("owner_id", user.id)
-      .single();
+    const { data: user, error: userErr } = await supabase.auth.getUser(token);
 
-    if (!org) {
-      return NextResponse.json({ invoices: [] });
+    if (userErr || !user?.user) {
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 401 }
+      );
     }
 
-    // Aggregate invoices:
-    const unified: any[] = [];
+    const userId = user.user.id;
 
-    // ======================================================================
+    // ---------------------------------------------
     // ⭐ STRIPE INVOICES
-    // ======================================================================
+    // ---------------------------------------------
+    let stripeInvoices: any[] = [];
+
     try {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
         apiVersion: "2023-10-16",
       });
 
-      const customers = await stripe.customers.list({
-        email: user.email!,
-        limit: 1,
-      });
+      const customerId = user.user.app_metadata?.billing_customer_id;
 
-      if (customers.data.length > 0) {
-        const customerId = customers.data[0].id;
-
-        const stripeInvoices = await stripe.invoices.list({
+      if (customerId) {
+        const invoices = await stripe.invoices.list({
           customer: customerId,
           limit: 20,
         });
 
-        for (const inv of stripeInvoices.data) {
-          unified.push({
-            id: inv.id,
-            provider: "stripe",
-            amount: inv.amount_paid / 100,
-            currency: inv.currency.toUpperCase(),
-            date: inv.created * 1000,
-            pdf: inv.invoice_pdf,
-            hosted_url: inv.hosted_invoice_url,
-          });
-        }
+        stripeInvoices = invoices.data.map((inv) => ({
+          id: inv.id,
+          provider: "stripe",
+          date: inv.created * 1000,
+          amount: inv.amount_paid / 100,
+          currency: inv.currency.toUpperCase(),
+          pdf: inv.invoice_pdf,
+        }));
       }
     } catch (err) {
-      console.error("Stripe invoice error:", err);
+      console.error("Stripe invoice fetch error:", err);
     }
 
-    // ======================================================================
+    // ---------------------------------------------
     // ⭐ LEMON SQUEEZY INVOICES
-    // ======================================================================
+    // ---------------------------------------------
+    let lemonInvoices: any[] = [];
+
     try {
-      const res = await fetch(
-        "https://api.lemonsqueezy.com/v1/invoices?filter[email]=" +
-          encodeURIComponent(user.email ?? ""),
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-            Accept: "application/vnd.api+json",
-          },
-        }
-      );
+      const lemonCustomerId = user.user.app_metadata?.lemon_customer_id;
 
-      const json = await res.json();
-      const lemonInvoices = json.data || [];
+      if (lemonCustomerId) {
+        const res = await fetch(
+          `https://api.lemonsqueezy.com/v1/customers/${lemonCustomerId}/invoices`,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+              Accept: "application/vnd.api+json",
+            },
+          }
+        );
 
-      for (const inv of lemonInvoices) {
-        const attr = inv.attributes;
+        const json = await res.json();
+        const invoices = json.data ?? [];
 
-        unified.push({
+        lemonInvoices = invoices.map((inv: any) => ({
           id: inv.id,
           provider: "lemon",
-          amount: attr.total / 100,
-          currency: attr.currency.toUpperCase(),
-          date: new Date(attr.created_at).getTime(),
-          pdf: attr.urls?.invoice_url,
-          hosted_url: attr.urls?.invoice_url,
-        });
+          date: new Date(inv.attributes.created_at).getTime(),
+          amount: inv.attributes.total / 100,
+          currency: inv.attributes.currency.toUpperCase(),
+          pdf: inv.attributes.urls?.invoice_url ?? null,
+        }));
       }
     } catch (err) {
-      console.error("Lemon invoice error:", err);
+      console.error("Lemon invoice fetch error:", err);
     }
 
-    // ======================================================================
-    // ⭐ INTERNAL INVOICES (Usage + Seat Overages)
-    // ======================================================================
+    // ---------------------------------------------
+    // ⭐ INTERNAL BILLING EVENTS
+    // ---------------------------------------------
+    let internalEvents: any[] = [];
+
     try {
-      const { data: internal, error } = await supabase
+      const { data, error } = await supabase
         .from("billing_events")
         .select("*")
-        .eq("org_id", org.id)
+        .eq("user_id", userId)
         .order("created_at", { ascending: false });
 
-      if (internal && !error) {
-        for (const ev of internal) {
-          unified.push({
-            id: ev.id,
-            provider: "internal",
-            amount: ev.amount,
-            currency: "USD",
-            date: new Date(ev.created_at).getTime(),
-            pdf: null,
-            hosted_url: null,
-            type: ev.type,
-            details: ev.details,
-          });
-        }
+      if (!error && data) {
+        internalEvents = data.map((e) => ({
+          id: e.id,
+          provider: "internal",
+          date: new Date(e.created_at).getTime(),
+          amount: e.amount,
+          currency: "USD",
+          pdf: null,
+          type: e.type,
+          details: e.details,
+        }));
       }
     } catch (err) {
-      console.error("Internal invoice error:", err);
+      console.error("Internal billing events error:", err);
     }
 
-    // Sort newest → oldest
-    unified.sort((a, b) => b.date - a.date);
+    // ---------------------------------------------
+    // ⭐ MERGE EVERYTHING INTO ONE LIST
+    // ---------------------------------------------
+    const all = [
+      ...stripeInvoices,
+      ...lemonInvoices,
+      ...internalEvents,
+    ].sort((a, b) => b.date - a.date);
 
-    return NextResponse.json({ invoices: unified });
+    return NextResponse.json({
+      invoices: all,
+    });
   } catch (err: any) {
-    console.error("Invoice loading failed:", err);
+    console.error("Invoice route error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
