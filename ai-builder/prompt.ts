@@ -1,32 +1,39 @@
 /**
- * DevVelocity AI Builder — Tier-Aware Prompt Generator
+ * DevVelocity AI Builder — Master Prompt (Full Version)
  *
- * Features:
- * ✔ Tier-based limits (providers, automation level, security level)
- * ✔ Auto-limits user choices when exceeding tier
- * ✔ Friendly + professional upgrade recommendations
- * ✔ Validated, structured prompt output
- * ✔ Cloud-aware architecture instructions
- * ✔ Automation-aware pipelines
- * ✔ CI/CD + cloud-init + docker output
+ * Generates:
+ *  - cloud architecture
+ *  - VPC + networking design
+ *  - automation pipelines
+ *  - cloud-init
+ *  - docker orchestration
+ *  - CI/CD
+ *  - SSO + security
+ *  - cost optimizations
+ *  - upgrade suggestions
+ *  - file portal recommendations
+ *  - developer experience flow
  */
 
 export function buildAIPrompt(answers: Record<number, any>) {
   const {
-    0: cloud,
-    1: automation,
-    2: providers,
-    3: maintenance,
-    4: budget,
-    5: security,
-    6: buildType,
-    7: project,
+    cloud,
+    automation,
+    providers,
+    maintenance,
+    budget,
+    security,
+    buildType,
+    project,
+    networking,
   } = answers;
 
-  // ---------------------------------------------------------
-  // 🎚 PLAN + TIER RULES
-  // ---------------------------------------------------------
+  // The user’s paid plan
   const plan = answers?.plan ?? "developer";
+
+  // -------------------------------------------
+  // 🧠 Tier feature matrix
+  // -------------------------------------------
 
   const planCaps: any = {
     developer: {
@@ -34,157 +41,196 @@ export function buildAIPrompt(answers: Record<number, any>) {
       automation: "basic",
       security: "none",
       ai_model: "small",
-      access: ["cloud-init", "basic pipelines"],
-      badge: "Developer Tier",
+      networking: "basic",
+      filePortal: false,
+      sso: false,
+      upgrade: "startup",
     },
+
     startup: {
       providers: 3,
       automation: "advanced",
       security: "basic",
       ai_model: "medium",
-      access: ["cloud-init", "docker", "pipelines"],
-      badge: "Startup Tier",
+      networking: "enhanced",
+      filePortal: true,
+      sso: true,
+      upgrade: "team",
     },
+
     team: {
       providers: 7,
       automation: "enterprise",
       security: "advanced",
       ai_model: "large",
-      access: ["all templates", "sso options"],
-      badge: "Team Tier",
+      networking: "enterprise",
+      filePortal: true,
+      sso: true,
+      upgrade: "enterprise",
     },
+
     enterprise: {
       providers: "unlimited",
       automation: "private",
       security: "enterprise",
       ai_model: "max",
-      access: ["everything"],
-      badge: "Enterprise Tier",
+      networking: "global",
+      filePortal: true,
+      sso: true,
     },
   };
 
   const caps = planCaps[plan];
 
-  // ---------------------------------------------------------
-  // 🛑 PROVIDER LIMIT LOGIC + UPGRADE PROMPTS
-  // ---------------------------------------------------------
-  let validatedProviders = providers || [];
-  let providerWarning = "";
+  // -------------------------------------------
+  // 🛑 Provider Limits
+  // -------------------------------------------
 
-  if (caps.providers !== "unlimited" && validatedProviders.length > caps.providers) {
-    providerWarning = `
-Your plan (${caps.badge}) allows **${caps.providers} provider(s)**.
-You selected **${validatedProviders.length}**.
+  let validatedProviders = providers;
 
-👉 I will automatically limit this to **${caps.providers}** to stay within your plan.
-👉 Upgrade any time to unlock **full multi-cloud support**.
-`;
-
-    validatedProviders = validatedProviders.slice(0, caps.providers);
+  if (caps.providers !== "unlimited" && providers?.length > caps.providers) {
+    validatedProviders = providers.slice(0, caps.providers);
   }
 
-  // ---------------------------------------------------------
-  // 🛑 AUTOMATION LIMIT (basic/advanced/enterprise/private)
-  // ---------------------------------------------------------
-  let automationWarning = "";
-  const canUseAdvanced =
+  // -------------------------------------------
+  // 🛑 Automation Limits
+  // -------------------------------------------
+  const advancedAllowed =
     ["advanced", "enterprise", "private"].includes(caps.automation);
 
-  const automationMode = canUseAdvanced ? automation : "basic";
+  const automationMode = advancedAllowed ? automation : "basic";
 
-  if (!canUseAdvanced && automation !== "basic") {
-    automationWarning = `
-Your plan (${caps.badge}) includes **Basic Automation**.
-
-👉 Advanced pipelines, multi-stage CI/CD, and integration workflows  
-require an upgrade to **Startup, Team, or Enterprise**.
-
-I'll continue using **Basic Automation** for now.
-`;
-  }
-
-  // ---------------------------------------------------------
-  // 🛑 SECURITY / SSO LIMIT
-  // ---------------------------------------------------------
-  let securityWarning = "";
+  // -------------------------------------------
+  // 🛑 Security Limits
+  // -------------------------------------------
   const allowedSecurity = caps.security;
 
-  if (security !== allowedSecurity && allowedSecurity !== "enterprise") {
-    securityWarning = `
-Your plan (${caps.badge}) includes **${allowedSecurity} security level**.
-
-👉 Advanced SSO, identity federation, or private tenant security  
-requires **Team or Enterprise**.
-
-I'll restrict security recommendations to **${allowedSecurity}** level.
-`;
+  // -------------------------------------------
+  // 🛑 Networking Limits
+  // -------------------------------------------
+  const networkingAllowed = caps.networking;
+  
+  let finalNetworking = networking;
+  if (networkingAllowed === "basic") {
+    // Block advanced topology
+    if (networking === "hybrid" || networking === "multi_vpc") {
+      finalNetworking = "single_vpc";
+    }
   }
 
-  // ---------------------------------------------------------
-  // 📝 COMPLETE AI PROMPT (this powers the AI Builder)
-  // ---------------------------------------------------------
-  return `
-You are **DevVelocity AI** — a world-class DevOps architect specializing in:
+  // -------------------------------------------
+  // 🧠 Upgrade Suggestions
+  // -------------------------------------------
+  const upgradeHints = [];
 
-• Cloud infrastructure design  
-• Managed service selection  
-• CI/CD automation  
-• cloud-init generation  
-• Docker + NGINX stacks  
-• Security architecture  
-• Multi-cloud decision-making  
-• Provider best practices  
-• Tier-aware SaaS feature gating  
-• Budget-optimized deployment planning  
+  if (providers?.length > caps.providers && caps.providers !== "unlimited") {
+    upgradeHints.push(
+      `You selected ${providers.length} providers, but your plan allows ${caps.providers}. Upgrade to ${caps.upgrade} for more cloud providers.`
+    );
+  }
+
+  if (automation !== "basic" && caps.automation === "basic") {
+    upgradeHints.push(
+      `Advanced automation requires the ${caps.upgrade} plan.`
+    );
+  }
+
+  if (security !== allowedSecurity) {
+    upgradeHints.push(
+      `Requested security level "${security}" exceeds your plan’s allowed level "${allowedSecurity}". Upgrade to unlock enhanced security.`
+    );
+  }
+
+  if (networking !== finalNetworking) {
+    upgradeHints.push(
+      `Advanced networking (multi-VPC or hybrid-cloud) requires the ${caps.upgrade} plan.`
+    );
+  }
+
+  if (!caps.filePortal) {
+    upgradeHints.push(
+      `The file template portal is not available on ${plan}. Upgrade to access saved builds & templates.`
+    );
+  }
+
+  // -------------------------------------------
+  // 🧠 System Prompt — THIS IS WHAT THE AI RUNS
+  // -------------------------------------------
+
+  return `
+You are **DevVelocity AI** — a senior cloud architect + DevOps engineer.
+
+You design full production infrastructure tailored to:
+- cloud provider
+- automation goals
+- networking requirements
+- project workload
+- user’s subscription tier
+- budget constraints
+- multi-cloud usage
+- SSO/security needs
+- CI/CD pipelines
+- cost optimization
+- uptime and failover strategy
+
+You ALWAYS respect plan limits and NEVER output features the tier does not allow.
 
 ---
 
-# VALIDATED USER INPUT
+# USER INPUT (Validated)
 
-## Cloud Provider Preference  
+Cloud Provider:
 ${cloud}
 
-## User Automation Goals (tier-limited)  
-${automationMode}
-
-${automationWarning}
-
-## Selected Cloud Providers (validated)  
+Selected Providers (tier-limited):
 ${JSON.stringify(validatedProviders, null, 2)}
 
-${providerWarning}
+Automation Mode (tier-limited):
+${automationMode}
 
-## Maintenance Preference  
+Networking (tier-adjusted):
+Requested: ${networking}
+Allowed: ${finalNetworking}
+
+Maintenance Preference:
 ${maintenance}
 
-## Monthly Budget  
+Budget:
 ${budget}
 
-## Security Requirements (validated)  
-Requested: ${security}  
-Allowed: ${allowedSecurity}  
-${securityWarning}
+Security:
+Requested: ${security}
+Allowed By Plan: ${allowedSecurity}
 
-## Build Type  
+Build Type:
 ${buildType}
 
-## Project Description  
+Project Description:
 ${project}
 
-## User Plan  
-${plan} (${caps.badge})
+Plan Tier:
+${plan}
 
-## Feature Caps  
+Plan Capabilities:
 ${JSON.stringify(caps, null, 2)}
+
+Upgrade Recommendations:
+${upgradeHints.join("\n")}
 
 ---
 
-# REQUIRED OUTPUT FORMAT
-Respond with **valid JSON**:
+# REQUIRED OUTPUT FORMAT (JSON ONLY)
 
 {
   "summary": "...",
   "architecture": "...",
+  "networking": {
+    "vpc": "...",
+    "subnets": "...",
+    "routing": "...",
+    "load_balancing": "...",
+    "firewall": "..."
+  },
   "cloud_init": "...",
   "docker_compose": "...",
   "pipelines": {
@@ -192,10 +238,11 @@ Respond with **valid JSON**:
     "automation": "..."
   },
   "maintenance_plan": "...",
-  "security_model": "...",
   "sso_recommendations": "...",
-  "budget_projection": "...",
-  "upgrade_recommendations": "...",
+  "security_model": "...",
+  "cost_optimization": "...",
+  "file_portal": "...",
+  "upgrade_paths": "...",
   "next_steps": "..."
 }
 
@@ -203,16 +250,19 @@ Respond with **valid JSON**:
 
 # RULES
 
-1. Always stay within the user's plan limits.  
-2. If a feature is above their tier, **recommend an upgrade** — but continue with limited output.  
-3. Always generate runnable cloud-init / Docker / pipeline code.  
-4. Optimize plans based on cloud provider preference.  
-5. For enterprise tier, unlock **everything** (no limits).  
-6. Mention limitations only when necessary.  
-7. Be helpful, friendly, and professional.  
+1. NEVER exceed plan tier limits.
+2. ALWAYS output real runnable configs (no placeholders).
+3. ALWAYS consider user budget.
+4. ALWAYS optimize for their chosen provider.
+5. ALWAYS include networking and VPC planning.
+6. ALWAYS suggest upgrades when relevant.
+7. ALWAYS generate SSO/security only if allowed by tier.
+8. ALWAYS generate pipelines if automation requested.
+9. ALWAYS include cost reduction strategies.
+10. ALWAYS include clear next steps.
 
 ---
 
-# BEGIN OUTPUT (JSON ONLY)
-  `;
+# BEGIN OUTPUT NOW
+`;
 }
