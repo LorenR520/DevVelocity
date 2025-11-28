@@ -1,180 +1,126 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useSearchParams, useParams, useRouter } from "next/navigation";
+import { hasFeature } from "@/ai-builder/plan-logic";
+import Link from "next/link";
 
-export default function FileVersionHistoryPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const supabase = createClientComponentClient();
+export default function FileHistoryPage() {
+  const params = useParams();
   const router = useRouter();
-
   const fileId = params.id;
 
-  const [file, setFile] = useState<any>(null);
-  const [versions, setVersions] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
+  const [fileMeta, setFileMeta] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [plan, setPlan] = useState("developer");
-  const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState("developer"); // will update later via auth
 
-  // -------------------------------------------------
-  // Load user metadata (plan + org)
-  // -------------------------------------------------
-  useEffect(() => {
-    async function loadUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user?.app_metadata?.plan) {
-        setPlan(user.app_metadata.plan);
-      }
-    }
-    loadUser();
-  }, []);
+  const allowAdvanced = hasFeature(plan, "file_portal");
 
-  // -------------------------------------------------
-  // Load file + version history
-  // -------------------------------------------------
   useEffect(() => {
     async function load() {
-      try {
-        setLoading(true);
+      const res = await fetch(`/api/files/history?id=${fileId}`);
+      const data = await res.json();
 
-        const { data: f, error: fileErr } = await supabase
-          .from("files")
-          .select("*")
-          .eq("id", fileId)
-          .single();
-
-        if (fileErr) throw fileErr;
-        setFile(f);
-
-        const { data: v, error: vErr } = await supabase
-          .from("file_version_history")
-          .select("*")
-          .eq("file_id", fileId)
-          .order("version", { ascending: false });
-
-        if (vErr) throw vErr;
-        setVersions(v || []);
-      } catch (err: any) {
-        setError(err.message);
-      }
-
+      setHistory(data.history || []);
+      setFileMeta(data.file || null);
       setLoading(false);
     }
-
     load();
-  }, [fileId, supabase]);
+  }, [fileId]);
 
-  // -------------------------------------------------
-  // If tier doesn't allow history → block access
-  // -------------------------------------------------
-  if (plan === "developer") {
-    return (
-      <main className="max-w-3xl mx-auto p-12 text-center text-white">
-        <h1 className="text-3xl font-bold">Upgrade Required</h1>
-        <p className="mt-4 text-gray-400">
-          Version history is available on Startup, Team, and Enterprise plans.
-        </p>
-      </main>
-    );
-  }
+  async function restore(versionId: string) {
+    if (!allowAdvanced) {
+      router.push("/dashboard/billing/upgrade");
+      return;
+    }
 
-  // -------------------------------------------------
-  // Restore a version → creates a new version entry
-  // -------------------------------------------------
-  async function restoreVersion(v: any) {
-    try {
-      const { error } = await supabase.functions.invoke(
-        "restore-file-version",
-        {
-          body: { file_id: fileId, version: v.version },
-        }
-      );
+    const res = await fetch("/api/files/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        version_id: versionId,
+        file_id: fileId,
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
 
-      if (error) throw error;
-
+    const json = await res.json();
+    if (json.error) {
+      alert("Error: " + json.error);
+    } else {
+      alert("Version restored successfully!");
       router.refresh();
-    } catch (err: any) {
-      alert("Error restoring version: " + err.message);
     }
   }
-
-  // -------------------------------------------------
-  // Open in AI Builder → prefill the editor
-  // -------------------------------------------------
-  async function openInAIBuilder(content: string) {
-    localStorage.setItem("devvelocity_ai_prefill", content);
-    router.push("/ai-builder?prefill=1");
-  }
-
-  // -------------------------------------------------
-  // UI Rendering
-  // -------------------------------------------------
 
   if (loading) {
     return (
-      <main className="max-w-3xl mx-auto p-12 text-white text-center">
-        Loading version history…
-      </main>
+      <div className="text-center text-gray-400 py-20">Loading version history...</div>
     );
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-6">
-        Version History — {file?.filename}
-      </h1>
+    <main className="max-w-5xl mx-auto px-6 py-16 text-white">
 
-      <p className="text-gray-400 mb-12">
-        Track older versions, restore builds, and send versions to the AI Builder
-        for upgrade recommendations.
-      </p>
+      {/* Back Link */}
+      <Link
+        href="/dashboard/files"
+        className="text-blue-400 underline text-sm mb-6 inline-block"
+      >
+        ← Back to Files
+      </Link>
 
-      <div className="space-y-4">
-        {versions.map((v) => (
+      <h1 className="text-3xl font-bold mb-6">Version History</h1>
+
+      {/* File Metadata */}
+      {fileMeta && (
+        <div className="mb-10 p-6 bg-neutral-900 border border-neutral-800 rounded-xl">
+          <h2 className="text-xl font-semibold">{fileMeta.filename}</h2>
+          <p className="text-gray-400 text-sm mt-1">
+            Created: {new Date(fileMeta.created_at).toLocaleString()}
+          </p>
+          <p className="text-gray-400 text-sm">
+            Last Updated: {new Date(fileMeta.updated_at).toLocaleString()}
+          </p>
+        </div>
+      )}
+
+      {/* Version List */}
+      <div className="space-y-6">
+        {history.length === 0 && (
+          <p className="text-gray-500">No version history available.</p>
+        )}
+
+        {history.map((v) => (
           <div
-            key={v.version}
-            className="p-6 border border-neutral-800 rounded-xl bg-neutral-900"
+            key={v.id}
+            className="p-6 bg-neutral-900 border border-neutral-800 rounded-xl"
           >
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-start">
               <div>
-                <p className="font-semibold">
-                  Version {v.version}
-                  {v.version !== file.latest_version && (
-                    <span className="ml-2 text-xs text-yellow-400">
-                      (Outdated — upgrade recommended)
-                    </span>
-                  )}
-                </p>
-                <p className="text-sm text-gray-400">
+                <h3 className="text-lg font-semibold">
+                  Version {v.version_number}
+                </h3>
+                <p className="text-gray-400 text-sm">
                   Saved: {new Date(v.created_at).toLocaleString()}
                 </p>
               </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => openInAIBuilder(v.content)}
-                  className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-700"
-                >
-                  Open in AI Builder
-                </button>
-
-                <button
-                  onClick={() => restoreVersion(v)}
-                  className="px-3 py-1 text-sm rounded bg-green-600 hover:bg-green-700"
-                >
-                  Restore
-                </button>
-              </div>
+              <button
+                onClick={() => restore(v.id)}
+                className={`px-4 py-2 rounded-lg ${
+                  allowAdvanced
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-neutral-700 cursor-pointer"
+                }`}
+              >
+                Restore
+              </button>
             </div>
 
-            <pre className="mt-4 text-xs bg-black/40 p-3 rounded overflow-x-auto">
-{v.content}
+            {/* Simple DIFF Preview */}
+            <pre className="mt-4 whitespace-pre-wrap text-xs bg-black/40 p-4 rounded-lg overflow-x-auto">
+              {v.diff_preview || v.content.substring(0, 500) + "…"}
             </pre>
           </div>
         ))}
