@@ -1,24 +1,17 @@
 // app/api/billing/invoices/route.ts
 
-import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-
-export const config = {
-  runtime: "edge",
-};
+import Stripe from "stripe";
+import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
   try {
-    // ------------------------------
-    // ⭐ Fetch user/org context
-    // ------------------------------
     const url = new URL(req.url);
-    const orgId = url.searchParams.get("orgId");
+    const orgId = url.searchParams.get("org");
 
     if (!orgId) {
       return NextResponse.json(
-        { error: "Missing orgId" },
+        { error: "Missing org parameter" },
         { status: 400 }
       );
     }
@@ -28,61 +21,49 @@ export async function GET(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Get org metadata
-    const { data: org, error: orgErr } = await supabase
+    // ============================================================
+    // ⭐ STRIPE INVOICES
+    // ============================================================
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: "2023-10-16",
+    });
+
+    let stripeInvoices: any[] = [];
+
+    const org = await supabase
       .from("organizations")
-      .select("*")
+      .select("stripe_customer_id, lemon_customer_id")
       .eq("id", orgId)
       .single();
 
-    if (orgErr || !org) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
-    }
-
-    const results: any[] = [];
-
-    // ------------------------------
-    // ⭐ STRIPE INVOICES
-    // ------------------------------
-    if (org.billing_provider === "stripe" && org.stripe_customer_id) {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
-      const stripeInvoices = await stripe.invoices.list({
-        customer: org.stripe_customer_id,
+    if (org.data?.stripe_customer_id) {
+      const stripeList = await stripe.invoices.list({
+        customer: org.data.stripe_customer_id,
         limit: 50,
       });
 
-      stripeInvoices.data.forEach((inv) =>
-        results.push({
-          id: inv.id,
-          provider: "stripe",
-          amount: inv.amount_paid / 100,
-          currency: inv.currency.toUpperCase(),
-          status: inv.status,
-          date: inv.created * 1000,
-          pdf: inv.invoice_pdf,
-          hosted_url: inv.hosted_invoice_url,
-          items: inv.lines.data.map((l) => ({
-            description: l.description,
-            amount: l.amount / 100,
-            quantity: l.quantity,
-          })),
-        })
-      );
+      stripeInvoices = stripeList.data.map((inv) => ({
+        id: inv.id,
+        provider: "stripe",
+        amount: inv.amount_paid / 100,
+        currency: inv.currency.toUpperCase(),
+        date: inv.status_transitions.paid_at
+          ? inv.status_transitions.paid_at * 1000
+          : Date.now(),
+        pdf: inv.invoice_pdf,
+        status: inv.status,
+        hosted_invoice_url: inv.hosted_invoice_url,
+      }));
     }
 
-    // ------------------------------
+    // ============================================================
     // ⭐ LEMON SQUEEZY INVOICES
-    // ------------------------------
-    if (
-      org.billing_provider === "lemon" &&
-      org.lemon_order_id
-    ) {
+    // ============================================================
+    let lemonInvoices: any[] = [];
+
+    if (org.data?.lemon_customer_id) {
       const res = await fetch(
-        `https://api.lemonsqueezy.com/v1/orders/${org.lemon_order_id}/invoices`,
+        `https://api.lemonsqueezy.com/v1/invoices?filter[customer_id]=${org.data.lemon_customer_id}`,
         {
           headers: {
             Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
@@ -92,57 +73,55 @@ export async function GET(req: Request) {
       );
 
       const json = await res.json();
-      const invoices = json.data || [];
 
-      invoices.forEach((inv: any) => {
-        const a = inv.attributes;
-
-        results.push({
+      lemonInvoices =
+        json.data?.map((inv: any) => ({
           id: inv.id,
           provider: "lemon",
-          amount: a.total / 100,
-          currency: a.currency.toUpperCase(),
-          date: new Date(a.created_at).getTime(),
-          status: a.status,
-          pdf: a.urls?.invoice_url,
-          hosted_url: a.urls?.receipt_url,
-        });
-      });
+          amount: inv.attributes.total / 100,
+          currency: inv.attributes.currency.toUpperCase(),
+          date: new Date(inv.attributes.created_at).getTime(),
+          pdf: inv.attributes.urls?.invoice_url,
+          status: inv.attributes.status,
+        })) ?? [];
     }
 
-    // ------------------------------
-    // ⭐ INTERNAL BILLING EVENTS
-    // (usage overages + seat overages)
-    // ------------------------------
-    const { data: internal, error: intErr } = await supabase
+    // ============================================================
+    // ⭐ INTERNAL BILLING EVENTS (seat overage + usage overage)
+    // ============================================================
+    const { data: internal, error: internalErr } = await supabase
       .from("billing_events")
       .select("*")
       .eq("org_id", orgId)
       .order("created_at", { ascending: false });
 
-    if (!intErr && internal) {
-      internal.forEach((ev) =>
-        results.push({
-          id: ev.id,
-          provider: "internal",
-          amount: ev.amount,
-          currency: "USD",
-          status: "processed",
-          date: new Date(ev.created_at).getTime(),
-          type: ev.type,
-          details: ev.details,
-        })
-      );
-    }
+    const internalInvoices =
+      internal?.map((e) => ({
+        id: e.id,
+        provider: "internal",
+        amount: e.amount,
+        currency: "USD",
+        date: new Date(e.created_at).getTime(),
+        pdf: null,
+        status: "paid",
+        type: e.type,
+        details: e.details,
+      })) ?? [];
 
-    // Sort newest → oldest
-    results.sort((a, b) => b.date - a.date);
+    // ============================================================
+    // ⭐ MERGE ALL PROVIDERS INTO ONE RESPONSE
+    // ============================================================
+    const invoices = [
+      ...stripeInvoices,
+      ...lemonInvoices,
+      ...internalInvoices,
+    ].sort((a, b) => b.date - a.date);
 
-    return NextResponse.json({ invoices: results });
+    return NextResponse.json({ invoices });
   } catch (err: any) {
-    console.error("Invoice route error:", err);
+    console.error("Invoices route error:", err);
     return NextResponse.json(
-      { error: err.message },
+      { error: err.message ?? "Unexpected error" },
       { status: 500 }
     );
   }
