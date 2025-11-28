@@ -2,109 +2,99 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
 
 export async function POST(req: Request) {
-  const raw = await req.text();
-  const signature = req.headers.get("x-signature");
+  try {
+    const { plan, orgId } = await req.json();
 
-  // Validate webhook signature
-  const hmac = crypto
-    .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET!)
-    .update(raw)
-    .digest("hex");
-
-  if (hmac !== signature) {
-    console.error("❌ Invalid Lemon Squeezy signature");
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
-  }
-
-  const event = JSON.parse(raw);
-  const type = event.meta.event_name;
-  const data = event.data?.attributes;
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
-  );
-
-  console.log("🍋 Lemon Webhook:", type);
-
-  // ==========================================================================================
-  // ⭐ SUBSCRIPTION CREATED / UPDATED
-  // ==========================================================================================
-  if (type === "subscription_created" || type === "subscription_updated") {
-    const customerEmail = data.user_email;
-    const planVariant = data.variant_id;
-    const status = data.status;
-
-    // Find user by email
-    const { data: user } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("email", customerEmail)
-      .single();
-
-    if (user) {
-      await supabase.auth.admin.updateUserById(user.id, {
-        app_metadata: {
-          billing_provider: "lemonsqueezy",
-          plan: planVariant,
-          status,
-        },
-      });
-
-      console.log("🍋 Updated Lemon subscription:", user.id);
+    if (!plan || !orgId) {
+      return NextResponse.json(
+        { error: "Missing plan or orgId" },
+        { status: 400 }
+      );
     }
-  }
 
-  // ==========================================================================================
-  // ⭐ INVOICE PAID
-  // ==========================================================================================
-  if (type === "invoice_paid") {
-    await supabase.from("invoices").insert({
-      provider: "lemon",
-      invoice_id: data.id,
-      customer_email: data.user_email,
-      amount: data.total / 100,
-      currency: data.currency,
-      pdf: data.urls?.invoice_url,
-      date: new Date().toISOString(),
+    // Map plan → Lemon variant
+    const variantMap: Record<string, string> = {
+      developer: process.env.LEMON_VARIANT_DEVELOPER!,
+      startup: process.env.LEMON_VARIANT_STARTUP!,
+      team: process.env.LEMON_VARIANT_TEAM!,
+      enterprise: process.env.LEMON_VARIANT_ENTERPRISE!,
+    };
+
+    const variantId = variantMap[plan];
+    if (!variantId) {
+      return NextResponse.json(
+        { error: "Invalid plan" },
+        { status: 400 }
+      );
+    }
+
+    // Supabase admin
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // Get user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const res = await fetch(
+      `${process.env.LEMON_CHECKOUT_URL_BASE}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          data: {
+            type: "checkouts",
+            attributes: {
+              product_id: process.env.LEMON_STORE_ID,
+              variant_id: variantId,
+              checkout_data: {
+                email: user.email,
+                custom: {
+                  user_id: user.id,
+                  org_id: orgId,
+                  plan,
+                },
+              },
+              redirect_url: `${process.env.APP_URL}/dashboard/billing/success`,
+            },
+          },
+        }),
+      }
+    );
+
+    const json = await res.json();
+
+    if (!json?.data?.attributes?.url) {
+      return NextResponse.json(
+        { error: "Failed to create Lemon checkout" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      url: json.data.attributes.url,
     });
-
-    console.log("💰 Lemon Invoice Saved:", data.id);
+  } catch (err: any) {
+    console.error("Lemon checkout error:", err);
+    return NextResponse.json(
+      { error: err.message ?? "Internal server error" },
+      { status: 500 }
+    );
   }
-
-  // ==========================================================================================
-  // ⭐ SUBSCRIPTION CANCELLED
-  // ==========================================================================================
-  if (type === "subscription_cancelled") {
-    const email = data.user_email;
-
-    const { data: user } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("email", email)
-      .single();
-
-    if (user) {
-      await supabase.auth.admin.updateUserById(user.id, {
-        app_metadata: {
-          billing_provider: "lemonsqueezy",
-          plan: null,
-          status: "canceled",
-        },
-      });
-
-      console.log("🍋 Subscription cancelled:", user.id);
-    }
-  }
-
-  return NextResponse.json({ received: true });
 }
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
