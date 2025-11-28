@@ -22,6 +22,21 @@
         "build_minute_price": 0.03,
         "pipeline_price": 0.20,
         "api_call_price": 0.0002
+      },
+
+      "automation": {
+        "ci_cd": "basic",
+        "scheduled_tasks": false,
+        "multi_cloud_failover": false,
+        "backups": "manual",
+        "monitoring": "none",
+        "compliance": "none",
+        "sso": false,
+        "scim": false,
+        "observability": "none",
+        "deployment_safety": "none",
+        "scaling": "none",
+        "vendor_integrations": ["github"]
       }
     },
 
@@ -47,6 +62,21 @@
         "build_minute_price": 0.02,
         "pipeline_price": 0.15,
         "api_call_price": 0.00015
+      },
+
+      "automation": {
+        "ci_cd": "standard",
+        "scheduled_tasks": "daily",
+        "multi_cloud_failover": false,
+        "backups": "daily",
+        "monitoring": "basic",
+        "compliance": "none",
+        "sso": "basic",
+        "scim": false,
+        "observability": "basic",
+        "deployment_safety": "rollback",
+        "scaling": "rules",
+        "vendor_integrations": ["github", "supabase"]
       }
     },
 
@@ -72,6 +102,21 @@
         "build_minute_price": 0.015,
         "pipeline_price": 0.10,
         "api_call_price": 0.0001
+      },
+
+      "automation": {
+        "ci_cd": "advanced",
+        "scheduled_tasks": "hourly",
+        "multi_cloud_failover": false,
+        "backups": "hourly",
+        "monitoring": "enhanced",
+        "compliance": "basic",
+        "sso": "advanced",
+        "scim": false,
+        "observability": "enhanced",
+        "deployment_safety": "blue_green",
+        "scaling": "autoscale",
+        "vendor_integrations": ["github", "supabase", "stripe"]
       }
     },
 
@@ -97,6 +142,21 @@
         "build_minute_price": "custom",
         "pipeline_price": "custom",
         "api_call_price": "custom"
+      },
+
+      "automation": {
+        "ci_cd": "enterprise",
+        "scheduled_tasks": "continuous",
+        "multi_cloud_failover": true,
+        "backups": "continuous",
+        "monitoring": "full",
+        "compliance": "enterprise",
+        "sso": "enterprise",
+        "scim": true,
+        "observability": "full",
+        "deployment_safety": "zero_downtime",
+        "scaling": "ai_autoscale",
+        "vendor_integrations": ["github", "supabase", "stripe", "cloudflare", "terraform", "aws", "azure", "gcp"]
       }
     }
   ]
