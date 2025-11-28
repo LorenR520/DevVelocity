@@ -1,155 +1,121 @@
-// app/api/billing/lemon/route.ts
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { sendReceipt } from "@/server/email/send-receipt";
 
 export async function POST(req: Request) {
   try {
-    const raw = await req.text();
-    const sig = req.headers.get("x-signature");
+    const rawBody = await req.text();
+    const signature = req.headers.get("X-Signature");
 
-    if (!sig) {
+    if (!signature) {
+      return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+    }
+
+    // Verify Lemon Squeezy signature
+    const crypto = await import("crypto");
+    const hmac = crypto.createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET!);
+    hmac.update(rawBody);
+    const digest = hmac.digest("hex");
+
+    if (signature !== digest) {
+      console.error("Invalid Lemon webhook signature");
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+
+    const event = JSON.parse(rawBody);
+    const type = event.meta.event_name;
+    const data = event.data;
+
+    console.log("📩 Lemon Webhook:", type);
+
+    const sub = data?.attributes;
+    const userId = sub?.user_id;
+    const variantId = sub?.variant_id;
+
+    if (!userId || !variantId) {
       return NextResponse.json(
-        { error: "Missing Lemon Squeezy signature" },
+        { error: "Missing user or variant" },
         { status: 400 }
       );
     }
 
-    // Validate signature
-    const valid = await verifySignature(raw, sig, process.env.LEMON_WEBHOOK_SECRET!);
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
-    }
+    // Map each variant to a plan (matching pricing.json)
+    const planMap: Record<string, string> = {
+      [process.env.LEMON_VARIANT_DEVELOPER!]: "developer",
+      [process.env.LEMON_VARIANT_STARTUP!]: "startup",
+      [process.env.LEMON_VARIANT_TEAM!]: "team",
+      [process.env.LEMON_VARIANT_ENTERPRISE!]: "enterprise",
+    };
 
-    const event = JSON.parse(raw);
+    const mappedPlan = planMap[String(variantId)];
 
+    // Prepare Supabase admin client
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ============================================================
-    // ⭐ EVENT TYPES
-    // ============================================================
+    // -----------------------------
+    // ⭐ SUBSCRIPTION STARTED / UPDATED
+    // -----------------------------
+    if (
+      type === "subscription_created" ||
+      type === "subscription_updated" ||
+      type === "subscription_payment_success"
+    ) {
+      await supabase.auth.admin.updateUserById(userId, {
+        app_metadata: {
+          billing_provider: "lemonsqueezy",
+          plan: mappedPlan,
+          lemon_variant: variantId,
+          lemon_status: sub.status,
+        },
+      });
 
-    switch (event.meta.event_name) {
-      // --------------------------------------------------
-      // Subscription created or updated
-      // --------------------------------------------------
-      case "subscription_created":
-      case "subscription_updated": {
-        const sub = event.data.attributes;
-
-        const orgId = sub.custom_data?.orgId;
-        const plan = sub.custom_data?.plan;
-
-        console.log("🔄 Lemon plan update:", orgId, plan);
-
-        await supabase
-          .from("organizations")
-          .update({
-            plan_id: plan,
-            lemon_subscription_id: sub.id,
-            subscription_status: sub.status,
-          })
-          .eq("id", orgId);
-
-        break;
-      }
-
-      // --------------------------------------------------
-      // Subscription canceled
-      // --------------------------------------------------
-      case "subscription_cancelled": {
-        const sub = event.data.attributes;
-        const orgId = sub.custom_data?.orgId;
-
-        console.log("❌ Lemon subscription canceled:", orgId);
-
-        await supabase
-          .from("organizations")
-          .update({
-            subscription_status: "canceled",
-          })
-          .eq("id", orgId);
-        break;
-      }
-
-      // --------------------------------------------------
-      // Invoice paid
-      // --------------------------------------------------
-      case "invoice_created": {
-        const inv = event.data.attributes;
-        const email = inv.customer_email;
-        const orgId = inv.custom_data?.orgId;
-        const plan = inv.custom_data?.plan;
-
-        const amount = inv.total / 100;
-
-        console.log("📬 Sending Lemon receipt:", email);
-
-        // You *can* send branded receipts via Resend
-        await sendReceipt({
-          to: email,
-          plan,
-          seats: 1,
-          amount,
-        });
-
-        // Internal billing log
-        await supabase.from("billing_events").insert({
-          org_id: orgId,
-          type: "lemon_payment",
-          amount,
-          details: {
-            invoice_id: inv.id,
-            plan,
-            seats: 1,
-          },
-        });
-
-        break;
-      }
+      console.log(`Lemon: Updated user ${userId} -> plan ${mappedPlan}`);
     }
 
-    return NextResponse.json({ success: true });
+    // -----------------------------
+    // ⭐ SUBSCRIPTION CANCELLED
+    // -----------------------------
+    if (type === "subscription_cancelled") {
+      await supabase.auth.admin.updateUserById(userId, {
+        app_metadata: {
+          billing_provider: "lemonsqueezy",
+          plan: "cancelled",
+          lemon_status: "cancelled",
+        },
+      });
+
+      console.log(`Lemon: User ${userId} subscription cancelled`);
+    }
+
+    // -----------------------------
+    // ⭐ WRITE INTERNAL BILLING EVENT
+    // -----------------------------
+    if (type === "subscription_payment_success") {
+      const amount = sub.renewal_total / 100;
+
+      await supabase.from("billing_events").insert({
+        org_id: userId,
+        type: "subscription",
+        amount,
+        provider: "lemon",
+        details: {
+          variant: variantId,
+          plan: mappedPlan,
+          renewal_date: sub.renews_at,
+        },
+      });
+
+      console.log(`Lemon: Added billing event for renewal $${amount}`);
+    }
+
+    return NextResponse.json({ status: "ok" });
   } catch (err: any) {
-    console.error("Lemon webhook error:", err);
+    console.error("Lemon Webhook Error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Webhook error" },
+      { error: err.message || "Internal error" },
       { status: 500 }
     );
   }
-}
-
-// ============================================================
-// ⭐ SIGNATURE VERIFICATION (Lemon requirement)
-// ============================================================
-async function verifySignature(payload: string, signature: string, secret: string) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["verify"]
-  );
-
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    hexToBytes(signature),
-    encoder.encode(payload)
-  );
-
-  return valid;
-}
-
-function hexToBytes(hex: string) {
-  const arr = [];
-  for (let i = 0; i < hex.length; i += 2) {
-    arr.push(parseInt(hex.substring(i, i + 2), 16));
-  }
-  return new Uint8Array(arr);
 }
