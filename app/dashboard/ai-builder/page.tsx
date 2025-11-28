@@ -1,8 +1,9 @@
+// app/dashboard/ai-builder/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
 import { generateQuestions } from "@/ai-builder/plan-logic";
-import AIBuildResult from "@/components/AIBuildResult";
+import ResultViewer from "@/components/ResultViewer";
 
 // ----------------------------------------
 // AI Builder Page
@@ -16,11 +17,12 @@ export default function AIBuildPage() {
   const [error, setError] = useState<string | null>(null);
 
   // ----------------------------------------
-  // Load questions whenever plan tier changes
+  // Load questions when plan tier changes
   // ----------------------------------------
   useEffect(() => {
     const q = generateQuestions(plan);
     setQuestions(q);
+    setAnswers({}); // reset answers when plan changes
   }, [plan]);
 
   const updateAnswer = (id: number, value: any) => {
@@ -28,7 +30,7 @@ export default function AIBuildPage() {
   };
 
   // ----------------------------------------
-  // Submit the AI build request
+  // Submit → AI Builder Engine (API route)
   // ----------------------------------------
   async function submit() {
     setLoading(true);
@@ -55,7 +57,11 @@ export default function AIBuildPage() {
         setError(json.error);
       } else {
         setResult(json.output);
-        window.scrollTo({ top: 99999, behavior: "smooth" });
+
+        // smooth scroll to result
+        setTimeout(() => {
+          window.scrollTo({ top: 99999, behavior: "smooth" });
+        }, 100);
       }
     } catch (err: any) {
       setError(err.message);
@@ -65,7 +71,7 @@ export default function AIBuildPage() {
   }
 
   // ----------------------------------------
-  // Render questionnaire UI
+  // Render UI
   // ----------------------------------------
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 text-white">
@@ -154,7 +160,7 @@ export default function AIBuildPage() {
       )}
 
       {/* ------------------ AI Result Viewer ------------------ */}
-      {result && <AIBuildResult result={result} />}
+      {result && <ResultViewer result={result} />}
     </main>
   );
 }
