@@ -3,119 +3,96 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import pricing from "@/marketing/pricing.json";
-import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { planId, seats } = await req.json();
+    const { plan, userId, email } = await req.json();
 
-    if (!planId) {
-      return NextResponse.json({ error: "Missing planId" }, { status: 400 });
-    }
-
-    const plan = pricing.plans.find((p) => p.id === planId);
-    if (!plan) {
-      return NextResponse.json({ error: "Invalid planId" }, { status: 400 });
-    }
-
-    // Enterprise forces custom contact
-    if (planId === "enterprise") {
-      return NextResponse.json({
-        url: "https://devvelocity.app/contact-enterprise",
-      });
-    }
-
-    // ----------------------------------
-    // ⭐ Supabase: Auth + Org
-    // ----------------------------------
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: org, error: orgErr } = await supabase
-      .from("organizations")
-      .select("*")
-      .eq("owner_id", user.id)
-      .single();
-
-    if (orgErr || !org) {
+    if (!plan || !userId) {
       return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
+        { error: "Missing plan or userId" },
+        { status: 400 }
       );
     }
 
-    // ----------------------------------
-    // ⭐ Stripe initialization
-    // ----------------------------------
+    // Match plan from pricing.json
+    const selectedPlan = pricing.plans.find((p: any) => p.id === plan);
+
+    if (!selectedPlan) {
+      return NextResponse.json(
+        { error: "Invalid plan" },
+        { status: 400 }
+      );
+    }
+
+    // Stripe SDK initialization
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    // Seats: dynamic or included
-    const seatCount = seats ?? plan.seats_included ?? 1;
+    // Create or reuse Stripe customer
+    const customer = await stripe.customers.create({
+      email: email ?? undefined,
+      metadata: {
+        userId,
+        plan,
+      },
+    });
 
-    // We create the price dynamically:
-    // 1. Base plan
-    // 2. Seat count multiplier for overages (Stripe handles multi-quantity)
-
+    // Create the Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer_email: user.email!,
-      metadata: {
-        user_id: user.id,
-        org_id: org.id,
-        plan_id: planId,
-        seats: seatCount,
-      },
+      customer: customer.id,
+      success_url: `${process.env.PUBLIC_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.PUBLIC_URL}/dashboard/billing?canceled=1`,
       line_items: [
         {
           price_data: {
             currency: "usd",
-            recurring: { interval: "month" },
-            unit_amount: plan.price * 100,
+            unit_amount: selectedPlan.price * 100,
             product_data: {
-              name: `${plan.name} Plan`,
-              description: `${plan.providers} Providers · ${plan.builder} Builder · SSO: ${plan.sso}`,
+              name: `${selectedPlan.name} Plan`,
+              metadata: {
+                plan,
+                builders: selectedPlan.builder,
+                sso: selectedPlan.sso,
+              },
+            },
+            recurring: {
+              interval: "month",
             },
           },
           quantity: 1,
         },
-        {
-          // Additional seats beyond included
-          price_data: {
-            currency: "usd",
-            recurring: { interval: "month" },
-            unit_amount: (plan.seat_price ?? 0) * 100,
-            product_data: {
-              name: "Extra Seat",
-              description: "Additional team seat",
-            },
-          },
-          quantity:
-            typeof plan.seats_included === "number"
-              ? Math.max(0, seatCount - plan.seats_included)
-              : 0,
-        },
       ],
-      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
+
+      metadata: {
+        userId,
+        plan,
+      },
+
+      subscription_data: {
+        metadata: {
+          userId,
+          plan,
+        },
+      },
     });
 
-    return NextResponse.json({ url: session.url });
+    if (!session?.url) {
+      return NextResponse.json(
+        { error: "Failed to create Stripe checkout session" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      url: session.url,
+    });
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message ?? "Stripe checkout failed" },
       { status: 500 }
     );
   }
