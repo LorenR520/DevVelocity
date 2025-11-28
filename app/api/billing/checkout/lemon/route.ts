@@ -1,94 +1,78 @@
 // app/api/billing/checkout/lemon/route.ts
 
 import { NextResponse } from "next/server";
-import pricing from "@/marketing/pricing.json";
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const { plan, userId } = await req.json();
+    const { subscriptionId, orgId, plan } = await req.json();
 
-    if (!plan || !userId) {
+    if (!subscriptionId || !orgId || !plan) {
       return NextResponse.json(
-        { error: "Missing plan or userId" },
+        { error: "Missing subscriptionId, orgId, or plan" },
         { status: 400 }
       );
     }
 
-    // Lookup plan in pricing.json
-    const selected = pricing.plans.find((p) => p.id === plan);
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    if (!selected) {
+    // -----------------------------
+    // GET USER (for validation)
+    // -----------------------------
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
       return NextResponse.json(
-        { error: "Invalid plan ID" },
-        { status: 400 }
+        { error: "Unauthorized" },
+        { status: 401 }
       );
     }
 
-    // Map plan → Lemon Squeezy Variant ID
-    const variantMap: Record<string, string> = {
-      developer: process.env.LEMON_VARIANT_DEVELOPER!,
-      startup: process.env.LEMON_VARIANT_STARTUP!,
-      team: process.env.LEMON_VARIANT_TEAM!,
-      enterprise: process.env.LEMON_VARIANT_ENTERPRISE!,
-    };
+    // -----------------------------
+    // UPDATE ORG RECORD
+    // -----------------------------
+    const { error: orgErr } = await supabase
+      .from("organizations")
+      .update({
+        plan_id: plan,
+        billing_provider: "lemon",
+        lemon_subscription_id: subscriptionId,
+        pending_overage_amount: 0,
+      })
+      .eq("id", orgId);
 
-    const variantId = variantMap[plan];
-    const storeId = process.env.LEMON_STORE_ID!;
-    const checkoutBase = process.env.LEMON_CHECKOUT_URL_BASE!;
-
-    // Enterprise → redirect to sales instead of auto-checkout
-    if (plan === "enterprise") {
-      return NextResponse.json({
-        url: "https://devvelocity.app/contact-sales",
-      });
-    }
-
-    // Build checkout payload
-    const payload = {
-      data: {
-        type: "checkouts",
-        attributes: {
-          checkout_data: {
-            custom: {
-              userId,
-              plan,
-            },
-          },
-        },
-        relationships: {
-          store: { data: { type: "stores", id: storeId } },
-          variant: { data: { type: "variants", id: variantId } },
-        },
-      },
-    };
-
-    // Create checkout
-    const res = await fetch(checkoutBase, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-        "Content-Type": "application/vnd.api+json",
-        Accept: "application/vnd.api+json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await res.json();
-
-    if (!json?.data?.attributes?.url) {
-      console.error("❌ Lemon checkout error:", json);
+    if (orgErr) {
+      console.error("Failed to update org:", orgErr);
       return NextResponse.json(
-        { error: "Checkout creation failed", details: json },
+        { error: "Failed to update organization" },
         { status: 500 }
       );
     }
 
-    // Return the direct checkout URL
+    // -----------------------------
+    // UPDATE USER METADATA
+    // -----------------------------
+    await supabase.auth.admin.updateUserById(user.id, {
+      app_metadata: {
+        billing_provider: "lemon",
+        plan,
+        lemon_subscription_id: subscriptionId,
+      },
+    });
+
     return NextResponse.json({
-      url: json.data.attributes.url,
+      success: true,
+      message: "Lemon subscription linked successfully",
+      subscriptionId,
+      plan,
     });
   } catch (err: any) {
-    console.error("Lemon Checkout Error:", err.message);
+    console.error("Lemon checkout link error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
