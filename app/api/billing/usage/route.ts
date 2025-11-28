@@ -2,122 +2,87 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import pricing from "@/marketing/pricing.json";
 
-// This API returns:
-//  - Total usage for current cycle
-//  - Plan limits
-//  - Overage amounts (if any)
-//  - Usage breakdown for charts
-
 export async function GET(req: Request) {
   try {
+    // Init Supabase Admin Client
     const supabase = createClient(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ------------------------------
-    // 1. Get current user session
-    // ------------------------------
-    const token =
-      req.headers.get("Authorization")?.replace("Bearer ", "") ?? null;
+    // -------------------------------
+    // 1. Get user from request
+    // -------------------------------
+    const accessToken = req.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!accessToken) {
+      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
+    }
 
+    // Get authenticated user
     const {
       data: { user },
-    } = await supabase.auth.getUser(token);
+    } = await supabase.auth.getUser(accessToken);
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ------------------------------
-    // 2. Load user’s organization
-    // ------------------------------
+    // -------------------------------
+    // 2. Get user's organization
+    // -------------------------------
+    const { data: orgMember } = await supabase
+      .from("organization_members")
+      .select("org_id")
+      .eq("user_id", user.id)
+      .single();
+
+    if (!orgMember) {
+      return NextResponse.json({ error: "No org linked" }, { status: 403 });
+    }
+
     const { data: org } = await supabase
       .from("organizations")
       .select("*")
-      .eq("id", user.app_metadata.org_id)
+      .eq("id", orgMember.org_id)
       .single();
 
     if (!org) {
       return NextResponse.json({ error: "Org not found" }, { status: 404 });
     }
 
-    const plan = pricing.plans.find((p) => p.id === org.plan_id);
-    if (!plan) {
-      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
-    }
+    const planId = org.plan_id;
 
-    // ------------------------------
-    // 3. Fetch usage logs for cycle
-    // ------------------------------
+    // -------------------------------
+    // 3. Get usage logs in cycle
+    // -------------------------------
     const { data: usageLogs } = await supabase
       .from("usage_logs")
       .select("*")
       .eq("org_id", org.id)
-      .gte("date", org.current_cycle_start)
-      .order("date", { ascending: true });
+      .gte("date", org.current_cycle_start);
 
-    const usage = usageLogs ?? [];
+    const logs = usageLogs ?? [];
 
-    // Sum totals
-    const totalBuildMinutes = usage.reduce(
-      (s, u) => s + u.build_minutes,
-      0
-    );
+    const total_build_minutes = logs.reduce((t, u) => t + (u.build_minutes ?? 0), 0);
+    const total_pipelines = logs.reduce((t, u) => t + (u.pipelines_run ?? 0), 0);
+    const total_api_calls = logs.reduce((t, u) => t + (u.provider_api_calls ?? 0), 0);
 
-    const totalPipelines = usage.reduce((s, u) => s + u.pipelines_run, 0);
-
-    const totalApiCalls = usage.reduce((s, u) => s + u.provider_api_calls, 0);
-
-    // ------------------------------
-    // 4. Calculate overages
-    // ------------------------------
-    const overBuild = Math.max(
-      0,
-      totalBuildMinutes - plan.limits.build_minutes
-    );
-
-    const overPipelines = Math.max(0, totalPipelines - plan.limits.pipelines);
-
-    const overApi = Math.max(0, totalApiCalls - plan.limits.api_calls);
-
-    const amount =
-      overBuild * plan.metered.build_minute_price +
-      overPipelines * plan.metered.pipeline_price +
-      overApi * plan.metered.api_call_price;
-
-    // ------------------------------
-    // 5. Return final response
-    // ------------------------------
+    // -------------------------------
+    // 4. Respond with usage info
+    // -------------------------------
     return NextResponse.json({
-      plan: plan.id,
+      planId,
       cycle_start: org.current_cycle_start,
-
       totals: {
-        build_minutes: totalBuildMinutes,
-        pipelines: totalPipelines,
-        api_calls: totalApiCalls,
+        total_build_minutes,
+        total_pipelines,
+        total_api_calls,
       },
-
-      limits: {
-        build_minutes: plan.limits.build_minutes,
-        pipelines: plan.limits.pipelines,
-        api_calls: plan.limits.api_calls,
-      },
-
-      overages: {
-        build_minutes: overBuild,
-        pipelines: overPipelines,
-        api_calls: overApi,
-        amount,
-      },
-
-      logs: usage,
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Usage API error:", err);
     return NextResponse.json(
-      { error: "Internal error", details: String(err) },
+      { error: err.message ?? "Internal error" },
       { status: 500 }
     );
   }
