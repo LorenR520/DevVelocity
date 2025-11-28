@@ -1,41 +1,52 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import PricingTable from "@/components/PricingTable";
+import pricing from "@/marketing/pricing.json";
 
-export default function UpgradePlanPage() {
-  const params = useSearchParams();
-  const plan = params.get("plan");
+export default function UpgradePage() {
+  const [currentPlan, setCurrentPlan] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(false);
-
-  async function checkout() {
-    setLoading(true);
-
-    const res = await fetch("/api/checkout", {
-      method: "POST",
-      body: JSON.stringify({ plan, userId: "current-user" }),
-    });
-
-    const data = await res.json();
-
-    if (data.url) {
-      window.location.href = data.url;
+  useEffect(() => {
+    async function load() {
+      const res = await fetch("/api/billing/summary", { cache: "no-store" });
+      const json = await res.json();
+      setCurrentPlan(json.plan?.id || null);
     }
+    load();
+  }, []);
+
+  if (!pricing?.plans) {
+    return (
+      <div className="text-center text-gray-400 py-20">
+        Loading pricing...
+      </div>
+    );
   }
 
-  return (
-    <section className="max-w-xl mx-auto px-6 py-20 text-white">
-      <h1 className="text-3xl font-bold mb-4">Upgrade Plan</h1>
-      <p className="text-gray-300 mb-6">Plan: {plan}</p>
+  // Decorate plans with CTA and badges
+  const decoratedPlans = pricing.plans.map((p) => {
+    const isCurrent = currentPlan === p.id;
 
-      <button
-        onClick={checkout}
-        disabled={loading}
-        className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-md"
-      >
-        {loading ? "Redirecting..." : "Continue to Checkout"}
-      </button>
-    </section>
+    return {
+      ...p,
+      cta: isCurrent ? "Current Plan" : "Upgrade",
+      href: isCurrent
+        ? "#"
+        : `/api/billing/checkout/lemon?plan=${p.id}`, // default checkout
+      badge: p.id === "startup" ? "Most Popular" : undefined,
+    };
+  });
+
+  return (
+    <main className="max-w-5xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-3xl font-bold mb-10">Upgrade Plan</h1>
+
+      <p className="text-gray-300 mb-8">
+        Choose the plan that fits your scale. All upgrades apply instantly.
+      </p>
+
+      <PricingTable plans={decoratedPlans} />
+    </main>
   );
 }
