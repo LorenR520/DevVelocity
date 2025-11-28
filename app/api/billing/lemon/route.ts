@@ -1,156 +1,131 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
-    const signature = req.headers.get("x-signature") || "";
 
-    // Validate signature
-    const crypto = await import("crypto");
+    const signature = req.headers.get("X-Signature");
+
+    if (!signature) {
+      return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+    }
+
+    // Verify webhook signature
     const hmac = crypto
       .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET!)
       .update(rawBody)
       .digest("hex");
 
-    if (hmac !== signature) {
-      console.error("❌ Invalid Lemon Squeezy webhook signature");
+    if (signature !== hmac) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
-    const payload = JSON.parse(rawBody);
-    const event = payload.meta?.event_name;
-    const data = payload.data;
+    const body = JSON.parse(rawBody);
+    const eventName = body.meta?.event_name;
+    const data = body.data;
 
-    if (!event || !data) {
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_KEY!
+    );
+
+    // ---------------------------------------------------------------------
+    // ⭐ Identify subscription + user
+    // ---------------------------------------------------------------------
+    const attributes = data?.attributes;
+
+    const customerEmail = attributes?.user_email;
+    const subscriptionId = data?.id;
+    const status = attributes?.status;
+    const variantId = attributes?.variant_id;
+
+    if (!customerEmail) {
       return NextResponse.json(
-        { error: "Invalid Lemon webhook payload" },
+        { error: "No customer email in event" },
         { status: 400 }
       );
     }
 
-    // Supabase Admin client
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // Lookup organization by owner email
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("*")
+      .eq("owner_email", customerEmail)
+      .single();
 
-    const subscription = data.attributes;
-    const customerId = data.relationships?.customer?.data?.id;
-    const variantId = subscription.variant_id;
-    const status = subscription.status;
+    if (orgErr || !org) {
+      console.log("Organization not found for:", customerEmail);
+      return NextResponse.json({ ok: true });
+    }
 
-    // -------------------------------------------
-    // ⭐ Map Lemon variant_id → your plan IDs
-    // -------------------------------------------
-    const variantToPlan: Record<number, string> = {
-      [Number(process.env.LEMON_VARIANT_DEVELOPER)]: "developer",
-      [Number(process.env.LEMON_VARIANT_STARTUP)]: "startup",
-      [Number(process.env.LEMON_VARIANT_TEAM)]: "team",
-      [Number(process.env.LEMON_VARIANT_ENTERPRISE)]: "enterprise",
+    // ---------------------------------------------------------------------
+    // ⭐ Map Lemon variant to your plan_id
+    // ---------------------------------------------------------------------
+    const lemonToPlanMap: Record<string, string> = {
+      [process.env.LEMON_VARIANT_DEVELOPER!]: "developer",
+      [process.env.LEMON_VARIANT_STARTUP!]: "startup",
+      [process.env.LEMON_VARIANT_TEAM!]: "team",
+      [process.env.LEMON_VARIANT_ENTERPRISE!]: "enterprise",
     };
 
-    const mappedPlan = variantToPlan[variantId] ?? "unknown";
+    const newPlan = lemonToPlanMap[String(variantId)] ?? null;
 
-    // -------------------------------------------
-    // ⭐ Fetch the customer to get the userId
-    // -------------------------------------------
-    let userId = null;
+    // ---------------------------------------------------------------------
+    // ⭐ Handle events
+    // ---------------------------------------------------------------------
 
-    if (customerId) {
-      const customerRes = await fetch(
-        `https://api.lemonsqueezy.com/v1/customers/${customerId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
-            Accept: "application/vnd.api+json",
-          },
-        }
-      );
+    // 🔄 Subscription created or renewed
+    if (
+      eventName === "subscription_created" ||
+      eventName === "subscription_payment_success" ||
+      eventName === "subscription_renewed"
+    ) {
+      await supabase
+        .from("organizations")
+        .update({
+          billing_provider: "lemon",
+          plan_id: newPlan,
+          subscription_status: status,
+          lemon_subscription_id: subscriptionId,
+        })
+        .eq("id", org.id);
 
-      const customerJson = await customerRes.json();
-      userId = customerJson?.data?.attributes?.user_id;
+      console.log("✔ Updated Lemon subscription:", org.id);
     }
 
-    // -------------------------------------------
-    // ⭐ Handle Events
-    // -------------------------------------------
-    switch (event) {
-      // ------------------------------
-      // ⭐ Subscription Created
-      // ------------------------------
-      case "subscription_created": {
-        if (userId) {
-          await supabase.auth.admin.updateUserById(userId, {
-            app_metadata: {
-              billing_provider: "lemonsqueezy",
-              plan: mappedPlan,
-              lemon_subscription_id: data.id,
-              status,
-            },
-          });
-        }
-        break;
-      }
-
-      // ------------------------------
-      // ⭐ Subscription Updated
-      // ------------------------------
-      case "subscription_updated": {
-        if (userId) {
-          await supabase.auth.admin.updateUserById(userId, {
-            app_metadata: {
-              billing_provider: "lemonsqueezy",
-              plan: mappedPlan,
-              lemon_subscription_id: data.id,
-              status,
-            },
-          });
-        }
-        break;
-      }
-
-      // ------------------------------
-      // ⭐ Subscription Canceled
-      // ------------------------------
-      case "subscription_cancelled": {
-        if (userId) {
-          await supabase.auth.admin.updateUserById(userId, {
-            app_metadata: {
-              billing_provider: "lemonsqueezy",
-              plan: "free",
-              status: "canceled",
-            },
-          });
-        }
-        break;
-      }
-
-      // ------------------------------
-      // ⭐ Invoice Paid ⇒ Billing History
-      // ------------------------------
-      case "invoice_paid": {
-        await supabase.from("billing_events").insert({
-          provider: "lemon",
-          invoice_id: data.id,
-          amount: subscription.total / 100,
-          currency: subscription.currency,
-          type: "lemon_invoice",
-          details: subscription,
-        });
-        break;
-      }
-
-      default:
-        console.log(`ℹ️ Unhandled Lemon event: ${event}`);
-        break;
+    // ❌ Subscription canceled
+    if (eventName === "subscription_cancelled") {
+      await supabase
+        .from("organizations")
+        .update({
+          subscription_status: "canceled",
+        })
+        .eq("id", org.id);
     }
 
-    return NextResponse.json({ received: true });
+    // ---------------------------------------------------------------------
+    // ⭐ Log billing event (invoices)
+    // ---------------------------------------------------------------------
+    if (eventName === "order_created") {
+      const amount = attributes?.total / 100;
+
+      await supabase.from("billing_events").insert({
+        org_id: org.id,
+        type: "lemon_invoice",
+        amount,
+        details: attributes,
+      });
+
+      console.log("✔ Logged Lemon invoice:", org.id);
+    }
+
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error("❌ Lemon Webhook Error:", err);
+    console.error("Lemon Webhook Error:", err);
     return NextResponse.json(
-      { error: err.message || "Server error" },
+      { error: err.message || "Webhook error" },
       { status: 500 }
     );
   }
