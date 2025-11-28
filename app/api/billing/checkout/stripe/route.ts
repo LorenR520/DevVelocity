@@ -6,11 +6,18 @@ import pricing from "@/marketing/pricing.json";
 
 export async function POST(req: Request) {
   try {
-    const { plan, userId } = await req.json();
+    const { plan, userId, orgId } = await req.json();
 
-    if (!plan || !userId) {
+    if (!plan) {
       return NextResponse.json(
-        { error: "Missing plan or userId" },
+        { error: "Missing plan" },
+        { status: 400 }
+      );
+    }
+
+    if (!userId || !orgId) {
+      return NextResponse.json(
+        { error: "Missing userId or orgId" },
         { status: 400 }
       );
     }
@@ -19,16 +26,16 @@ export async function POST(req: Request) {
       apiVersion: "2023-10-16",
     });
 
-    // Select plan from pricing.json
-    const selected = pricing.plans.find((p) => p.id === plan);
-    if (!selected) {
+    // Find plan in pricing.json
+    const selectedPlan = pricing.plans.find((p) => p.id === plan);
+    if (!selectedPlan) {
       return NextResponse.json(
         { error: "Invalid plan" },
         { status: 400 }
       );
     }
 
-    // Map plan → Stripe Price ID
+    // Map plan → Stripe price ID
     const priceMap: Record<string, string> = {
       developer: process.env.STRIPE_PRICE_DEVELOPER!,
       startup: process.env.STRIPE_PRICE_STARTUP!,
@@ -38,41 +45,39 @@ export async function POST(req: Request) {
 
     const priceId = priceMap[plan];
 
-    // Enterprise → redirect to manual contact page
-    if (plan === "enterprise") {
-      return NextResponse.json({
-        url: "https://devvelocity.app/contact-sales",
-      });
+    if (!priceId) {
+      return NextResponse.json(
+        { error: `Stripe price ID missing for plan: ${plan}` },
+        { status: 500 }
+      );
     }
 
-    const checkout = await stripe.checkout.sessions.create({
+    const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer_creation: "always",
+
+      metadata: {
+        plan,
+        userId,
+        orgId,
+      },
+
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata: {
-          plan,
-          userId,
-        },
-      },
-      metadata: {
-        plan,
-        userId,
-      },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=1`,
+
+      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
     });
 
-    return NextResponse.json({ url: checkout.url });
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error("Stripe Checkout Error:", err);
+    console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal Server Error" },
+      { error: err.message },
       { status: 500 }
     );
   }
