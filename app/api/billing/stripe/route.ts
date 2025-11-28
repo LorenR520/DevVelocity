@@ -4,154 +4,104 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-export const config = {
-  api: {
-    bodyParser: false, // Stripe requires raw body
-  },
-};
-
-// Utility to read raw request body in Next.js App Router
-async function bufferRequest(req: Request): Promise<Buffer> {
-  const arrayBuffer = await req.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
 export async function POST(req: Request) {
-  const rawBody = await bufferRequest(req);
+  const body = await req.text(); // Stripe requires raw body
+  const sig = req.headers.get("stripe-signature");
 
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
     apiVersion: "2023-10-16",
   });
 
-  const signature = req.headers.get("stripe-signature")!;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-
-  let event: Stripe.Event;
+  let event;
 
   try {
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      webhookSecret
-    );
+    event = stripe.webhooks.constructEvent(body, sig!, webhookSecret);
   } catch (err: any) {
-    console.error("❌ Stripe webhook signature mismatch:", err.message);
-    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    console.error("❌ Stripe Webhook Signature Error", err.message);
+    return new NextResponse(`Webhook Error: ${err.message}`, {
+      status: 400,
+    });
   }
 
   const supabase = createClient(
     process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_KEY!
   );
 
-  // ================
-  // ⭐ EVENT TYPES
-  // ================
-  switch (event.type) {
-    // --------------------------------------------
-    // ⭐ 1. Subscription Created / Updated
-    // --------------------------------------------
-    case "customer.subscription.created":
-    case "customer.subscription.updated": {
-      const subscription = event.data.object as Stripe.Subscription;
-      const customer = subscription.customer as any;
+  // ----------------------------------------------------------------------------------------------------
+  // ⭐ EVENT: Subscription Updated / Created
+  // ----------------------------------------------------------------------------------------------------
+  if (
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.created"
+  ) {
+    const subscription = event.data.object;
 
-      const userId = customer?.metadata?.userId;
-      const plan = subscription.items.data[0].price.id;
-      const seats = subscription.items.data[0].quantity;
+    const customer = await stripe.customers.retrieve(subscription.customer as string);
+    const userId = (customer as any).metadata?.userId;
 
-      if (!userId) break;
-
+    if (userId) {
       await supabase.auth.admin.updateUserById(userId, {
         app_metadata: {
           billing_provider: "stripe",
-          plan,
-          seats,
+          plan: subscription.items.data[0].price.id,
           status: subscription.status,
         },
       });
 
-      console.log("📦 Updated user subscription", userId);
-      break;
+      console.log("✅ Updated Stripe subscription for user:", userId);
     }
+  }
 
-    // --------------------------------------------
-    // ⭐ 2. Checkout Session Completed
-    // --------------------------------------------
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+  // ----------------------------------------------------------------------------------------------------
+  // ⭐ EVENT: Invoice Paid
+  // ----------------------------------------------------------------------------------------------------
+  if (event.type === "invoice.payment_succeeded") {
+    const invoice = event.data.object;
 
-      const userId = session.metadata?.userId;
-      const plan = session.metadata?.plan;
-      const seats = session.metadata?.seats ?? "1";
+    await supabase.from("invoices").insert({
+      provider: "stripe",
+      invoice_id: invoice.id,
+      customer_email: invoice.customer_email,
+      amount: invoice.amount_paid / 100,
+      currency: invoice.currency,
+      pdf: invoice.invoice_pdf,
+      date: new Date().toISOString(),
+    });
 
-      if (!userId) break;
+    console.log("💰 Stripe Invoice Saved:", invoice.id);
+  }
 
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "stripe",
-          plan,
-          seats,
-          status: "active",
-        },
-      });
+  // ----------------------------------------------------------------------------------------------------
+  // ⭐ EVENT: Seat metadata updated (future feature)
+  // ----------------------------------------------------------------------------------------------------
+  if (event.type === "customer.updated") {
+    const customer = event.data.object;
+    const userId = customer.metadata?.userId;
+    const seats = parseInt(customer.metadata?.seats ?? "1");
 
-      console.log("💳 Checkout completed for", userId);
-      break;
+    if (userId) {
+      const { data: org } = await supabase
+        .from("organizations")
+        .select("*")
+        .eq("owner_id", userId)
+        .single();
+
+      if (org) {
+        await supabase
+          .from("organizations")
+          .update({ seats })
+          .eq("id", org.id);
+      }
     }
-
-    // --------------------------------------------
-    // ⭐ 3. Invoice Paid — record billable events
-    // --------------------------------------------
-    case "invoice.paid": {
-      const invoice = event.data.object as Stripe.Invoice;
-
-      const amount = invoice.amount_paid / 100;
-      const invoiceId = invoice.id;
-      const userId = (invoice.customer as any)?.metadata?.userId;
-
-      // Store invoice record (for invoices page)
-      await supabase.from("billing_events").insert({
-        provider: "stripe",
-        invoice_id: invoiceId,
-        amount,
-        currency: invoice.currency.toUpperCase(),
-        user_id: userId ?? null,
-        type: invoice.billing_reason,
-        pdf: invoice.invoice_pdf,
-        hosted_url: invoice.hosted_invoice_url,
-      });
-
-      console.log("🧾 Invoice saved:", invoiceId);
-      break;
-    }
-
-    // --------------------------------------------
-    // ⭐ 4. Subscription Deleted (canceled)
-    // --------------------------------------------
-    case "customer.subscription.deleted": {
-      const subscription = event.data.object as Stripe.Subscription;
-      const customer = subscription.customer as any;
-
-      const userId = customer?.metadata?.userId;
-      if (!userId) break;
-
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "stripe",
-          plan: null,
-          seats: null,
-          status: "canceled",
-        },
-      });
-
-      console.log("❌ Subscription canceled for", userId);
-      break;
-    }
-
-    default:
-      console.log("ℹ️ Unhandled Stripe event:", event.type);
   }
 
   return NextResponse.json({ received: true });
 }
+
+export const config = {
+  api: {
+    bodyParser: false, // ❗ REQUIRED for Stripe webhooks
+  },
+};
