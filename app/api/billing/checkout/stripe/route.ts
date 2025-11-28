@@ -1,19 +1,16 @@
 // app/api/billing/checkout/stripe/route.ts
 
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import pricing from "@/marketing/pricing.json";
-import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
     const { planId, seats } = await req.json();
 
     if (!planId) {
-      return NextResponse.json(
-        { error: "Missing planId" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing planId" }, { status: 400 });
     }
 
     const plan = pricing.plans.find((p) => p.id === planId);
@@ -22,13 +19,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    // Enterprise → Redirect to contact page
+    // Enterprise requires contact, not checkout
     if (planId === "enterprise") {
       return NextResponse.json({
         url: "https://devvelocity.app/contact-enterprise",
       });
     }
 
+    // Initialize Supabase Admin
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
@@ -42,7 +40,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Load the customer org
+    // Load org
     const { data: org, error: orgErr } = await supabase
       .from("organizations")
       .select("*")
@@ -56,59 +54,38 @@ export async function POST(req: Request) {
       );
     }
 
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      apiVersion: "2023-10-16",
-    });
+    // Stripe price ID for this plan
+    const priceId = process.env[`STRIPE_PRICE_${planId.toUpperCase()}`];
 
-    // Create or reuse a Stripe Customer
-    let customerId = org.stripe_customer_id;
-
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email!,
-        metadata: {
-          orgId: org.id,
-          owner: user.id,
-        },
-      });
-
-      customerId = customer.id;
-
-      await supabase
-        .from("organizations")
-        .update({ stripe_customer_id: customerId })
-        .eq("id", org.id);
-    }
-
-    // Stripe Price IDs should match your dashboard
-    const stripePriceId = process.env[`STRIPE_PRICE_${planId.toUpperCase()}`];
-    if (!stripePriceId) {
+    if (!priceId) {
       return NextResponse.json(
-        { error: `Missing Stripe price for ${planId}` },
+        { error: `Missing Stripe price ID for plan ${planId}` },
         { status: 500 }
       );
     }
 
-    // Build metadata merged with plan
-    const metadata = {
-      plan_id: plan.id,
-      plan_name: plan.name,
-      seats: seats ?? plan.seats_included ?? 1,
-    };
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: "2023-10-16",
+    });
 
-    // Create checkout session
+    const quantitySeats = seats ?? plan.seats_included ?? 1;
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customerId,
+      payment_method_types: ["card"],
+      customer_email: user.email!,
+      metadata: {
+        org_id: org.id,
+        user_id: user.id,
+        plan_id: planId,
+        seats: quantitySeats,
+      },
       line_items: [
         {
-          price: stripePriceId,
+          price: priceId,
           quantity: 1,
         },
       ],
-      subscription_data: {
-        metadata,
-      },
       success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
       cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
     });
