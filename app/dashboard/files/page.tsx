@@ -1,158 +1,248 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
-interface SavedFile {
-  id: string;
-  name: string;
-  created_at: string;
-  category: string;
-  size_kb: number;
-}
-
+// ----------------------------------------
+// File Portal Page — With Paste Analyzer (Option C)
+// ----------------------------------------
 export default function FilePortalPage() {
-  const [plan, setPlan] = useState<string | null>(null);
-  const [files, setFiles] = useState<SavedFile[]>([]);
+  const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ---------------------------------------------------------
-  // Load plan + files
-  // ---------------------------------------------------------
+  const [plan, setPlan] = useState<string>("developer");
+  const [pasteInput, setPasteInput] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  // ----------------------------------------
+  // Load user plan + files on mount
+  // ----------------------------------------
   useEffect(() => {
-    async function load() {
-      // Load plan tier
-      const planRes = await fetch("/api/user/plan");
-      const planJson = await planRes.json();
-      setPlan(planJson.plan || "developer");
+    loadPortal();
+  }, []);
 
-      if (planJson.plan === "developer") {
-        setShowUpgradeModal(true);
+  async function loadPortal() {
+    try {
+      setLoading(true);
+
+      const userRes = await fetch("/api/user/me");
+      const userJson = await userRes.json();
+
+      setPlan(userJson?.plan ?? "developer");
+
+      if (userJson?.plan === "developer") {
+        setFiles([]);
         setLoading(false);
         return;
       }
 
-      // Load files
       const res = await fetch("/api/files/list");
       const json = await res.json();
 
-      if (!json.error) setFiles(json.files || []);
-
-      setLoading(false);
+      if (json.error) {
+        setError(json.error);
+      } else {
+        setFiles(json.files || []);
+      }
+    } catch (err: any) {
+      setError(err.message);
     }
 
-    load();
-  }, []);
+    setLoading(false);
+  }
 
-  // ---------------------------------------------------------
-  // Upgrade Modal (Developer Tier)
-  // ---------------------------------------------------------
-  const UpgradeBlockModal = () => {
-    if (!showUpgradeModal) return null;
+  // ----------------------------------------
+  // Download a saved file
+  // ----------------------------------------
+  async function downloadFile(fileId: string) {
+    const res = await fetch("/api/files/download", {
+      method: "POST",
+      body: JSON.stringify({ file_id: fileId }),
+    });
 
-    return (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-8 max-w-md w-full text-white">
-          <h2 className="text-2xl font-bold mb-4">
-            File Portal is not included in your current plan
-          </h2>
+    if (!res.ok) {
+      alert("Download failed.");
+      return;
+    }
 
-          <p className="text-gray-300 mb-6">
-            The File Portal is available starting at the{" "}
-            <span className="font-semibold text-blue-400">Startup Plan</span>.
-            Save infrastructure builds, cloud-init scripts, pipelines, 
-            and automation templates — and unlock full Dev+ capabilities.
-          </p>
+    const outdated = res.headers.get("X-DevVelocity-File-Outdated");
 
-          <a
-            href="/dashboard/billing/upgrade"
-            className="block w-full text-center py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
-          >
-            Upgrade to Unlock
-          </a>
+    if (outdated === "true") {
+      alert(
+        "⚠️ This file was generated over 30 days ago.\n\nWe recommend pasting it into the analyzer to refresh and update the build."
+      );
+    }
 
-          <button
-            onClick={() => setShowUpgradeModal(false)}
-            className="mt-4 w-full py-2 text-gray-400 hover:text-gray-200 text-sm"
-          >
-            Continue without File Portal
-          </button>
-        </div>
-      </div>
-    );
-  };
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
 
-  // ---------------------------------------------------------
-  // Developer → Block Entire Page
-  // ---------------------------------------------------------
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "devvelocity-build.txt";
+    a.click();
+  }
+
+  // ----------------------------------------
+  // Delete a saved file
+  // ----------------------------------------
+  async function deleteFile(fileId: string) {
+    if (!confirm("Delete this file?")) return;
+
+    const res = await fetch("/api/files/delete", {
+      method: "POST",
+      body: JSON.stringify({ file_id: fileId }),
+    });
+
+    const json = await res.json();
+
+    if (json.error) {
+      alert(json.error);
+      return;
+    }
+
+    loadPortal();
+  }
+
+  // ----------------------------------------
+  // Paste → Analyze → Auto-Upgrade
+  // ----------------------------------------
+  async function analyzeBuild() {
+    if (!pasteInput.trim()) return;
+
+    setAnalyzing(true);
+    setAnalysisResult(null);
+
+    const res = await fetch("/api/ai-builder/from-file", {
+      method: "POST",
+      body: JSON.stringify({
+        file_content: pasteInput,
+        plan,
+      }),
+    });
+
+    const json = await res.json();
+    setAnalysisResult(json);
+    setAnalyzing(false);
+
+    window.scrollTo({ top: 99999, behavior: "smooth" });
+  }
+
   if (plan === "developer") {
     return (
-      <>
-        <UpgradeBlockModal />
-        <main className="max-w-3xl mx-auto px-6 py-16 text-white">
-          <h1 className="text-3xl font-bold mb-6">File Portal</h1>
-          <p className="text-gray-400">
-            Upgrade your plan to save and manage your infrastructure templates.
-          </p>
-        </main>
-      </>
+      <main className="max-w-3xl mx-auto px-6 py-20 text-white">
+        <h1 className="text-3xl font-bold mb-6">File Portal (Locked)</h1>
+        <p className="text-gray-400 mb-8">
+          Saving infrastructure builds is available on:
+        </p>
+
+        <ul className="list-disc ml-6 space-y-2 text-gray-300">
+          <li>Startup</li>
+          <li>Team</li>
+          <li>Enterprise</li>
+        </ul>
+
+        <Link
+          href="/pricing"
+          className="inline-block mt-10 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        >
+          Upgrade Plan
+        </Link>
+      </main>
     );
   }
 
-  // ---------------------------------------------------------
-  // Main File Portal Page (Paid Plans Only)
-  // ---------------------------------------------------------
+  // ----------------------------------------
+  // MAIN PORTAL UI
+  // ----------------------------------------
   return (
-    <main className="max-w-5xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-10">Saved Files</h1>
+    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-3xl font-bold mb-10">Your Saved Builds</h1>
 
+      {/* FILE LIST */}
       {loading ? (
-        <p className="text-gray-400">Loading...</p>
+        <p>Loading...</p>
       ) : files.length === 0 ? (
-        <p className="text-gray-400">No files saved yet.</p>
+        <p className="text-gray-400">No saved files yet.</p>
       ) : (
-        <div className="overflow-x-auto border border-neutral-800 rounded-xl">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-neutral-800">
-              <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Size</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {files.map((file) => (
-                <tr
-                  key={file.id}
-                  className="border-t border-neutral-800 hover:bg-neutral-900"
+        <div className="space-y-6 mb-12">
+          {files.map((file) => (
+            <div
+              key={file.id}
+              className="p-5 bg-neutral-900 border border-neutral-800 rounded-xl flex justify-between items-center"
+            >
+              <div>
+                <p className="font-semibold">{file.name}</p>
+                <p className="text-gray-400 text-sm">
+                  Saved: {new Date(file.created_at).toLocaleString()}
+                </p>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => downloadFile(file.id)}
+                  className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"
                 >
-                  <td className="px-4 py-3">{file.name}</td>
-                  <td className="px-4 py-3 text-gray-400">{file.category}</td>
-                  <td className="px-4 py-3 text-gray-400">
-                    {file.size_kb} KB
-                  </td>
-                  <td className="px-4 py-3 text-gray-400">
-                    {new Date(file.created_at).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <a
-                      href={`/api/files/download?id=${file.id}`}
-                      className="text-blue-400 hover:underline"
-                    >
-                      Download
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  Download
+                </button>
+
+                <button
+                  onClick={() => deleteFile(file.id)}
+                  className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Modal */}
-      <UpgradeBlockModal />
+      {/* ----------------------------- */}
+      {/* PASTE + AUTO-UPGRADE ANALYZER */}
+      {/* ----------------------------- */}
+
+      <div className="mt-16 p-8 bg-neutral-900 border border-neutral-800 rounded-xl">
+        <h2 className="text-2xl font-bold mb-4">
+          Paste a Build to Update or Fix It
+        </h2>
+
+        <p className="text-gray-400 mb-6">
+          If you downloaded a file or have an older DevVelocity build, paste it
+          below and the AI will:
+        </p>
+
+        <ul className="text-gray-300 list-disc ml-6 mb-6 space-y-2">
+          <li>Detect outdated configs</li>
+          <li>Recommend upgrades based on your plan</li>
+          <li>Auto-refresh scripts (cloud-init, docker, pipelines)</li>
+          <li>Fix version mismatches + provider changes</li>
+          <li>Enhance automation if your tier allows it</li>
+        </ul>
+
+        <textarea
+          value={pasteInput}
+          onChange={(e) => setPasteInput(e.target.value)}
+          placeholder="Paste your exported build.txt here..."
+          className="w-full min-h-[180px] p-4 bg-black/40 border border-neutral-700 rounded-lg text-sm text-white"
+        />
+
+        <button
+          onClick={analyzeBuild}
+          disabled={analyzing}
+          className="mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        >
+          {analyzing ? "Analyzing..." : "Update This Build"}
+        </button>
+
+        {/* AI RESULT */}
+        {analysisResult && (
+          <pre className="mt-10 whitespace-pre-wrap text-sm p-4 bg-black/40 border border-neutral-700 rounded-lg">
+{JSON.stringify(analysisResult, null, 2)}
+          </pre>
+        )}
+      </div>
     </main>
   );
 }
