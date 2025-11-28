@@ -4,117 +4,153 @@ import { createClient } from "@supabase/supabase-js";
 export async function POST(req: Request) {
   try {
     const rawBody = await req.text();
-    const signature = req.headers.get("X-Signature");
+    const signature = req.headers.get("x-signature") || "";
 
-    if (!signature) {
-      return NextResponse.json({ error: "Missing signature" }, { status: 400 });
-    }
-
-    // Verify Lemon Squeezy signature
+    // Validate signature
     const crypto = await import("crypto");
-    const hmac = crypto.createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET!);
-    hmac.update(rawBody);
-    const digest = hmac.digest("hex");
+    const hmac = crypto
+      .createHmac("sha256", process.env.LEMON_WEBHOOK_SECRET!)
+      .update(rawBody)
+      .digest("hex");
 
-    if (signature !== digest) {
-      console.error("Invalid Lemon webhook signature");
+    if (hmac !== signature) {
+      console.error("❌ Invalid Lemon Squeezy webhook signature");
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
-    const event = JSON.parse(rawBody);
-    const type = event.meta.event_name;
-    const data = event.data;
+    const payload = JSON.parse(rawBody);
+    const event = payload.meta?.event_name;
+    const data = payload.data;
 
-    console.log("📩 Lemon Webhook:", type);
-
-    const sub = data?.attributes;
-    const userId = sub?.user_id;
-    const variantId = sub?.variant_id;
-
-    if (!userId || !variantId) {
+    if (!event || !data) {
       return NextResponse.json(
-        { error: "Missing user or variant" },
+        { error: "Invalid Lemon webhook payload" },
         { status: 400 }
       );
     }
 
-    // Map each variant to a plan (matching pricing.json)
-    const planMap: Record<string, string> = {
-      [process.env.LEMON_VARIANT_DEVELOPER!]: "developer",
-      [process.env.LEMON_VARIANT_STARTUP!]: "startup",
-      [process.env.LEMON_VARIANT_TEAM!]: "team",
-      [process.env.LEMON_VARIANT_ENTERPRISE!]: "enterprise",
-    };
-
-    const mappedPlan = planMap[String(variantId)];
-
-    // Prepare Supabase admin client
+    // Supabase Admin client
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // -----------------------------
-    // ⭐ SUBSCRIPTION STARTED / UPDATED
-    // -----------------------------
-    if (
-      type === "subscription_created" ||
-      type === "subscription_updated" ||
-      type === "subscription_payment_success"
-    ) {
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "lemonsqueezy",
-          plan: mappedPlan,
-          lemon_variant: variantId,
-          lemon_status: sub.status,
-        },
-      });
+    const subscription = data.attributes;
+    const customerId = data.relationships?.customer?.data?.id;
+    const variantId = subscription.variant_id;
+    const status = subscription.status;
 
-      console.log(`Lemon: Updated user ${userId} -> plan ${mappedPlan}`);
+    // -------------------------------------------
+    // ⭐ Map Lemon variant_id → your plan IDs
+    // -------------------------------------------
+    const variantToPlan: Record<number, string> = {
+      [Number(process.env.LEMON_VARIANT_DEVELOPER)]: "developer",
+      [Number(process.env.LEMON_VARIANT_STARTUP)]: "startup",
+      [Number(process.env.LEMON_VARIANT_TEAM)]: "team",
+      [Number(process.env.LEMON_VARIANT_ENTERPRISE)]: "enterprise",
+    };
+
+    const mappedPlan = variantToPlan[variantId] ?? "unknown";
+
+    // -------------------------------------------
+    // ⭐ Fetch the customer to get the userId
+    // -------------------------------------------
+    let userId = null;
+
+    if (customerId) {
+      const customerRes = await fetch(
+        `https://api.lemonsqueezy.com/v1/customers/${customerId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+            Accept: "application/vnd.api+json",
+          },
+        }
+      );
+
+      const customerJson = await customerRes.json();
+      userId = customerJson?.data?.attributes?.user_id;
     }
 
-    // -----------------------------
-    // ⭐ SUBSCRIPTION CANCELLED
-    // -----------------------------
-    if (type === "subscription_cancelled") {
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "lemonsqueezy",
-          plan: "cancelled",
-          lemon_status: "cancelled",
-        },
-      });
+    // -------------------------------------------
+    // ⭐ Handle Events
+    // -------------------------------------------
+    switch (event) {
+      // ------------------------------
+      // ⭐ Subscription Created
+      // ------------------------------
+      case "subscription_created": {
+        if (userId) {
+          await supabase.auth.admin.updateUserById(userId, {
+            app_metadata: {
+              billing_provider: "lemonsqueezy",
+              plan: mappedPlan,
+              lemon_subscription_id: data.id,
+              status,
+            },
+          });
+        }
+        break;
+      }
 
-      console.log(`Lemon: User ${userId} subscription cancelled`);
+      // ------------------------------
+      // ⭐ Subscription Updated
+      // ------------------------------
+      case "subscription_updated": {
+        if (userId) {
+          await supabase.auth.admin.updateUserById(userId, {
+            app_metadata: {
+              billing_provider: "lemonsqueezy",
+              plan: mappedPlan,
+              lemon_subscription_id: data.id,
+              status,
+            },
+          });
+        }
+        break;
+      }
+
+      // ------------------------------
+      // ⭐ Subscription Canceled
+      // ------------------------------
+      case "subscription_cancelled": {
+        if (userId) {
+          await supabase.auth.admin.updateUserById(userId, {
+            app_metadata: {
+              billing_provider: "lemonsqueezy",
+              plan: "free",
+              status: "canceled",
+            },
+          });
+        }
+        break;
+      }
+
+      // ------------------------------
+      // ⭐ Invoice Paid ⇒ Billing History
+      // ------------------------------
+      case "invoice_paid": {
+        await supabase.from("billing_events").insert({
+          provider: "lemon",
+          invoice_id: data.id,
+          amount: subscription.total / 100,
+          currency: subscription.currency,
+          type: "lemon_invoice",
+          details: subscription,
+        });
+        break;
+      }
+
+      default:
+        console.log(`ℹ️ Unhandled Lemon event: ${event}`);
+        break;
     }
 
-    // -----------------------------
-    // ⭐ WRITE INTERNAL BILLING EVENT
-    // -----------------------------
-    if (type === "subscription_payment_success") {
-      const amount = sub.renewal_total / 100;
-
-      await supabase.from("billing_events").insert({
-        org_id: userId,
-        type: "subscription",
-        amount,
-        provider: "lemon",
-        details: {
-          variant: variantId,
-          plan: mappedPlan,
-          renewal_date: sub.renews_at,
-        },
-      });
-
-      console.log(`Lemon: Added billing event for renewal $${amount}`);
-    }
-
-    return NextResponse.json({ status: "ok" });
+    return NextResponse.json({ received: true });
   } catch (err: any) {
-    console.error("Lemon Webhook Error:", err);
+    console.error("❌ Lemon Webhook Error:", err);
     return NextResponse.json(
-      { error: err.message || "Internal error" },
+      { error: err.message || "Server error" },
       { status: 500 }
     );
   }
