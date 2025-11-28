@@ -7,7 +7,9 @@
       "providers": 1,
       "updates": "monthly",
       "builder": "basic",
-      "sso": "none"
+      "sso": "none",
+      "seats_included": 1,
+      "seat_price": 5
     },
     {
       "id": "startup",
@@ -16,7 +18,9 @@
       "providers": 3,
       "updates": "weekly",
       "builder": "advanced",
-      "sso": "basic"
+      "sso": "basic",
+      "seats_included": 3,
+      "seat_price": 7
     },
     {
       "id": "team",
@@ -25,7 +29,9 @@
       "providers": 7,
       "updates": "daily",
       "builder": "enterprise",
-      "sso": "advanced"
+      "sso": "advanced",
+      "seats_included": 10,
+      "seat_price": 9
     },
     {
       "id": "enterprise",
@@ -34,7 +40,9 @@
       "providers": "unlimited",
       "updates": "continuous",
       "builder": "private",
-      "sso": "gov/enterprise"
+      "sso": "gov/enterprise",
+      "seats_included": "custom",
+      "seat_price": "custom"
     }
   ]
 }
