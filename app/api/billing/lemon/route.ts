@@ -2,137 +2,154 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-
-export const config = {
-  runtime: "edge",
-};
-
-// Validate Lemon webhook signature
-function verifyLemonSignature(req: Request, body: string) {
-  const secret = process.env.LEMON_WEBHOOK_SECRET!;
-  const signature = req.headers.get("X-Signature") || "";
-
-  // Lemon uses SHA256 HMAC (hex)
-  const cryptoKey = crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
-  return cryptoKey
-    .then((key) =>
-      crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body))
-    )
-    .then((sig) => Buffer.from(sig).toString("hex") === signature);
-}
+import { sendReceipt } from "@/server/email/send-receipt";
 
 export async function POST(req: Request) {
-  const body = await req.text();
+  try {
+    const raw = await req.text();
+    const sig = req.headers.get("x-signature");
 
-  const valid = await verifyLemonSignature(req, body);
-  if (!valid) {
-    console.error("❌ Invalid Lemon Squeezy signature");
-    return new Response("Invalid signature", { status: 400 });
+    if (!sig) {
+      return NextResponse.json(
+        { error: "Missing Lemon Squeezy signature" },
+        { status: 400 }
+      );
+    }
+
+    // Validate signature
+    const valid = await verifySignature(raw, sig, process.env.LEMON_WEBHOOK_SECRET!);
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+    }
+
+    const event = JSON.parse(raw);
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // ============================================================
+    // ⭐ EVENT TYPES
+    // ============================================================
+
+    switch (event.meta.event_name) {
+      // --------------------------------------------------
+      // Subscription created or updated
+      // --------------------------------------------------
+      case "subscription_created":
+      case "subscription_updated": {
+        const sub = event.data.attributes;
+
+        const orgId = sub.custom_data?.orgId;
+        const plan = sub.custom_data?.plan;
+
+        console.log("🔄 Lemon plan update:", orgId, plan);
+
+        await supabase
+          .from("organizations")
+          .update({
+            plan_id: plan,
+            lemon_subscription_id: sub.id,
+            subscription_status: sub.status,
+          })
+          .eq("id", orgId);
+
+        break;
+      }
+
+      // --------------------------------------------------
+      // Subscription canceled
+      // --------------------------------------------------
+      case "subscription_cancelled": {
+        const sub = event.data.attributes;
+        const orgId = sub.custom_data?.orgId;
+
+        console.log("❌ Lemon subscription canceled:", orgId);
+
+        await supabase
+          .from("organizations")
+          .update({
+            subscription_status: "canceled",
+          })
+          .eq("id", orgId);
+        break;
+      }
+
+      // --------------------------------------------------
+      // Invoice paid
+      // --------------------------------------------------
+      case "invoice_created": {
+        const inv = event.data.attributes;
+        const email = inv.customer_email;
+        const orgId = inv.custom_data?.orgId;
+        const plan = inv.custom_data?.plan;
+
+        const amount = inv.total / 100;
+
+        console.log("📬 Sending Lemon receipt:", email);
+
+        // You *can* send branded receipts via Resend
+        await sendReceipt({
+          to: email,
+          plan,
+          seats: 1,
+          amount,
+        });
+
+        // Internal billing log
+        await supabase.from("billing_events").insert({
+          org_id: orgId,
+          type: "lemon_payment",
+          amount,
+          details: {
+            invoice_id: inv.id,
+            plan,
+            seats: 1,
+          },
+        });
+
+        break;
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("Lemon webhook error:", err);
+    return NextResponse.json(
+      { error: err.message ?? "Webhook error" },
+      { status: 500 }
+    );
   }
+}
 
-  const event = JSON.parse(body);
-  const type = event.meta.event_name;
-
-  console.log("🔔 Lemon webhook:", type);
-
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+// ============================================================
+// ⭐ SIGNATURE VERIFICATION (Lemon requirement)
+// ============================================================
+async function verifySignature(payload: string, signature: string, secret: string) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
   );
 
-  const data = event.data?.attributes;
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    hexToBytes(signature),
+    encoder.encode(payload)
+  );
 
-  switch (type) {
-    // ------------------------------------------------------
-    // ⭐ CHECKOUT COMPLETE (first purchase)
-    // ------------------------------------------------------
-    case "checkout.completed": {
-      const { order_id, variant_id } = data;
-      const orgId = event.meta.custom_data?.orgId;
+  return valid;
+}
 
-      if (!orgId) break;
-
-      await supabase
-        .from("organizations")
-        .update({
-          plan_id: variant_id,
-          billing_provider: "lemon",
-          lemon_order_id: order_id,
-        })
-        .eq("id", orgId);
-
-      console.log(`✅ Lemon checkout completed for org ${orgId}`);
-      break;
-    }
-
-    // ------------------------------------------------------
-    // ⭐ SUBSCRIPTION RENEWAL PAYMENT
-    // ------------------------------------------------------
-    case "subscription_payment_success": {
-      const sub = event.data.attributes;
-
-      await supabase.from("billing_events").insert({
-        org_id: sub.user_id,
-        provider: "lemon",
-        type: "subscription_payment",
-        amount: sub.total / 100,
-        currency: sub.currency,
-        external_invoice_id: sub.transaction_id,
-        status: "paid",
-      });
-
-      console.log("💰 Lemon renewal payment saved");
-      break;
-    }
-
-    // ------------------------------------------------------
-    // ⭐ PAYMENT FAILED
-    // ------------------------------------------------------
-    case "subscription_payment_failed": {
-      const sub = event.data.attributes;
-
-      await supabase.from("billing_events").insert({
-        org_id: sub.user_id,
-        provider: "lemon",
-        type: "payment_failed",
-        amount: sub.total / 100,
-        currency: sub.currency,
-        external_invoice_id: sub.transaction_id,
-        status: "failed",
-      });
-
-      console.warn("⚠️ Lemon payment failed");
-      break;
-    }
-
-    // ------------------------------------------------------
-    // ⭐ SUBSCRIPTION CANCELLED
-    // ------------------------------------------------------
-    case "subscription_cancelled": {
-      const { user_id } = event.data.attributes;
-
-      await supabase
-        .from("organizations")
-        .update({
-          plan_id: "developer", // fallback to lowest tier
-          billing_provider: "none",
-        })
-        .eq("id", user_id);
-
-      console.log("❌ Lemon subscription cancelled for user:", user_id);
-      break;
-    }
-
-    default:
-      console.log("ℹ️ Unhandled Lemon event:", type);
+function hexToBytes(hex: string) {
+  const arr = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    arr.push(parseInt(hex.substring(i, i + 2), 16));
   }
-
-  return NextResponse.json({ received: true });
+  return new Uint8Array(arr);
 }
