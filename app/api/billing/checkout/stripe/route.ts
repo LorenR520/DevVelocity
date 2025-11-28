@@ -2,117 +2,56 @@
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
+import pricing from "@/marketing/pricing.json";
 
 export async function POST(req: Request) {
   try {
-    const { plan } = await req.json();
+    const { plan, userId, email } = await req.json();
 
-    if (!plan) {
+    if (!plan || !userId) {
       return NextResponse.json(
-        { error: "Missing plan" },
+        { error: "Missing plan or userId" },
         { status: 400 }
       );
     }
 
-    // Map plans → Stripe Price IDs
-    const planToPrice: Record<string, string> = {
-      developer: process.env.STRIPE_PRICE_DEVELOPER!,
-      startup: process.env.STRIPE_PRICE_STARTUP!,
-      team: process.env.STRIPE_PRICE_TEAM!,
-      enterprise: process.env.STRIPE_PRICE_ENTERPRISE!, // can be $1250 or custom quote
-    };
+    const selected = pricing.plans.find((p) => p.id === plan);
+    if (!selected) {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    }
 
-    const priceId = planToPrice[plan];
-
+    // Stripe Plan Price ID ENV → (You will set these)
+    const priceId = process.env[`STRIPE_PRICE_${plan.toUpperCase()}`];
     if (!priceId) {
       return NextResponse.json(
-        { error: "Invalid or unmapped plan" },
-        { status: 400 }
+        { error: `Missing Stripe price ID for plan: ${plan}` },
+        { status: 500 }
       );
     }
 
-    // --------------------------------------------
-    // ⭐ Load SUPABASE session to identify the user
-    // --------------------------------------------
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
-
-    const token = req.headers
-      .get("Authorization")
-      ?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json(
-        { error: "Missing Bearer token" },
-        { status: 401 }
-      );
-    }
-
-    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-
-    if (userErr || !userData?.user) {
-      return NextResponse.json(
-        { error: "Invalid or expired session" },
-        { status: 401 }
-      );
-    }
-
-    const user = userData.user;
-
-    // --------------------------------------------
-    // ⭐ Create Stripe Checkout Session
-    // --------------------------------------------
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      payment_method_types: ["card"],
-      customer_email: user.email,
-
+      customer_email: email ?? undefined,
+      metadata: { userId, plan },
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
-
-      metadata: {
-        user_id: user.id,
-        plan,
-        source: "devvelocity-app",
-      },
-
-      subscription_data: {
-        metadata: {
-          user_id: user.id,
-          plan,
-        },
-      },
-
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=1`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=1`,
+      success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
     });
 
-    if (!session.url) {
-      return NextResponse.json(
-        { error: "Checkout URL missing" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      url: session.url,
-    });
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error("Stripe Checkout Error:", err);
+    console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message ?? "Internal Server Error" },
       { status: 500 }
     );
   }
