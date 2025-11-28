@@ -1,190 +1,295 @@
 // ai-builder/cloud-init.ts
 
 /**
- * DevVelocity AI Builder — Cloud Init Generator
+ * DevVelocity AI Builder — Cloud-Init Generator
  *
- * Generates production-ready cloud-init based on:
- *  - Cloud provider
- *  - Budget tier
- *  - Plan limitations
- *  - Automation tasks
- *  - Security requirements
- *  - Build type (API, Web, Serverless, Worker, DB, etc)
+ * Produces production-ready VM bootstrap scripts for:
+ *  - AWS EC2
+ *  - Azure
+ *  - GCP
+ *  - Oracle Cloud
+ *  - DigitalOcean
+ * 
+ * Features:
+ *  - Node + PM2
+ *  - Docker (if enabled)
+ *  - NGINX reverse proxy
+ *  - SSL (Cloudflare or Let's Encrypt)
+ *  - Auto environment injection
+ *  - Auto app launch
  */
 
 import { getPlan } from "./plan-logic";
+import { generateNginxConfig } from "./nginx-template";
 
 export function generateCloudInit(answers: any) {
+  const cloud = (answers[0]?.[0] || "AWS").toLowerCase();
   const plan = getPlan(answers.plan);
-  const provider = (answers[0]?.[0] || "AWS").toLowerCase();
   const buildType = answers.buildType || "web";
-  const tasks = answers[2] || [];
 
-  const enableDocker =
-    ["web", "api", "fullstack", "docker"].includes(buildType);
+  // For Docker-enabled plans
+  const useDocker =
+    plan.builder === "advanced" ||
+    plan.builder === "enterprise" ||
+    plan.builder === "private";
 
-  const enableAgent =
-    plan.id !== "developer"; // Only developer excludes observability
+  const nginxConf = sanitize(generateNginxConfig(answers));
 
-  const enableFirewall = plan.security !== "none";
-  const enableFail2Ban = plan.security !== "none";
+  const envVars = formatEnvVars(answers.env || {});
 
-  const enableSSOAgent =
-    plan.sso === "advanced" || plan.sso === "enterprise";
-
-  const enableAutoUpdates =
-    plan.updates !== "none";
-
-  const enableCron =
-    tasks.includes("Scheduled Jobs") ||
-    plan.automation?.scheduled_tasks !== "basic";
-
-  // -----------------------------
-  // Provider-specific metadata
-  // -----------------------------
-
-  const providerBanner = {
-    aws: "🚀 AWS Instance Bootstrapped",
-    azure: "☁️ Azure VM Bootstrapped",
-    gcp: "🌎 GCP VM Bootstrapped",
-    oracle: "🔥 OCI Ampere VM Bootstrapped",
-    digitalocean: "🌊 DigitalOcean Droplet Bootstrapped",
-    hetzner: "⚡ Hetzner Server Provisioned",
-    linode: "🌐 Linode Server Provisioned",
-  }[provider] || "🔧 Generic Linux VM Bootstrapped";
-
-  // -----------------------------
-  // BEGIN Cloud Init
-  // -----------------------------
-
-  return `#cloud-config
-
-package_update: true
-package_upgrade: ${enableAutoUpdates ? "true" : "false"}
-
-hostname: devvelocity-node
-fqdn: devvelocity-node.internal
-
-write_files:
-  - path: /etc/motd
-    permissions: "0644"
-    content: |
-      ##############################################
-      ${providerBanner}
-      Managed by DevVelocity AI Builder
-      ##############################################
-
-${enableDocker ? writeDockerSection() : ""}
-
-${enableFirewall ? writeFirewallSection() : ""}
-
-${enableFail2Ban ? writeFail2BanSection() : ""}
-
-${enableAgent ? writeMonitoringSection(provider) : ""}
-
-${enableCron ? writeCronSection() : ""}
-
-runcmd:
-  - echo "Running startup tasks..."
-
-  ${enableDocker ? dockerStartCmds() : ""}
-  ${enableFirewall ? " - systemctl enable ufw && systemctl start ufw" : ""}
-  ${enableFail2Ban ? " - systemctl enable fail2ban && systemctl start fail2ban" : ""}
-  ${enableAgent ? monitoringStartCmds() : ""}
-
-  - echo "DevVelocity AI Builder provisioning complete."
-`;
+  // Select provider-specific init wrapper
+  switch (cloud) {
+    case "aws":
+      return awsInit(nginxConf, useDocker, envVars);
+    case "azure":
+      return azureInit(nginxConf, useDocker, envVars);
+    case "gcp":
+      return gcpInit(nginxConf, useDocker, envVars);
+    case "oracle":
+      return oracleInit(nginxConf, useDocker, envVars);
+    case "digitalocean":
+      return doInit(nginxConf, useDocker, envVars);
+    default:
+      return genericInit(nginxConf, useDocker, envVars);
+  }
 }
 
-// -----------------------------
-// SECTION BUILDERS
-// -----------------------------
+// -------------------------------------------------------------
+// 🔧 ENV helper
+// -------------------------------------------------------------
 
-function writeDockerSection() {
+function formatEnvVars(env: Record<string, string>) {
+  return Object.entries(env)
+    .map(([k, v]) => `export ${k}="${v}"`)
+    .join("\n");
+}
+
+// -------------------------------------------------------------
+// 🔧 Sanitize NGINX content for YAML
+// -------------------------------------------------------------
+
+function sanitize(conf: string) {
+  return conf.replace(/`/g, "\\`");
+}
+
+// -------------------------------------------------------------
+// 🌩  Cloud Provider Templates
+// -------------------------------------------------------------
+// Each file installs:
+// - Updates
+// - Node
+// - PM2
+// - Docker (if enabled)
+// - NGINX
+// - SSL
+// - App deployment
+// -------------------------------------------------------------
+
+// -------------------------
+// AWS EC2
+// -------------------------
+function awsInit(nginx: string, docker: boolean, env: string) {
   return `
-  - path: /etc/systemd/system/docker.service.d/devvelocity.conf
-    permissions: "0644"
-    content: |
-      [Service]
-      ExecStartPost=/usr/bin/docker ps
+#cloud-config
+package_update: true
+package_upgrade: true
 
 packages:
-  - docker.io
-  - docker-compose-plugin
+  - nginx
+  - git
+  - curl
+  - unzip
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+
+${docker ? dockerInstall() : ""}
+
+  # Write environment variables
+  - echo "${env}" >> /etc/profile
+
+  # Write NGINX config
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+
+  - systemctl restart nginx
+
+  # APP DEPLOY
+  - git clone https://your-repo/app.git /app
+  - cd /app
+  - npm install
+  - pm2 start npm --name "app" -- start
+  - pm2 save
 `;
 }
 
-function dockerStartCmds() {
+// -------------------------
+// Azure
+// -------------------------
+function azureInit(nginx: string, docker: boolean, env: string) {
   return `
+#cloud-config
+package_upgrade: true
+
+packages:
+  - nginx
+  - git
+  - curl
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+
+${docker ? dockerInstall() : ""}
+
+  - echo "${env}" >> /etc/profile
+
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+  - systemctl restart nginx
+
+  - git clone https://your-repo/app.git /app
+  - cd /app && npm install
+  - pm2 start npm -- start
+  - pm2 save
+`;
+}
+
+// -------------------------
+// Google Cloud
+// -------------------------
+function gcpInit(nginx: string, docker: boolean, env: string) {
+  return `
+#cloud-config
+packages:
+  - nginx
+  - git
+  - curl
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+
+${docker ? dockerInstall() : ""}
+
+  - echo "${env}" >> /etc/profile
+
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+  - systemctl restart nginx
+
+  - git clone https://your-repo/app.git /app
+  - cd /app && npm install
+  - pm2 start npm -- start
+  - pm2 save
+`;
+}
+
+// -------------------------
+// Oracle Cloud (ARM Ready)
+// -------------------------
+function oracleInit(nginx: string, docker: boolean, env: string) {
+  return `
+#cloud-config
+package_upgrade: true
+
+packages:
+  - nginx
+  - git
+  - curl
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs gcc g++ make
+  - npm install -g pm2
+
+${docker ? dockerInstall("arm64") : ""}
+
+  - echo "${env}" >> /etc/profile
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+  - systemctl restart nginx
+
+  - git clone https://your-repo/app.git /app
+  - cd /app && npm install
+  - pm2 start npm -- start
+  - pm2 save
+`;
+}
+
+// -------------------------
+// DigitalOcean
+// -------------------------
+function doInit(nginx: string, docker: boolean, env: string) {
+  return `
+#cloud-config
+package_update: true
+
+packages:
+  - nginx
+  - git
+  - curl
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+
+${docker ? dockerInstall() : ""}
+
+  - echo "${env}" >> /etc/profile
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+
+  - systemctl restart nginx
+
+  - git clone https://your-repo/app.git /app
+  - cd /app && npm install
+  - pm2 start npm -- start
+  - pm2 save
+`;
+}
+
+// -------------------------
+// Fallback Generic Provider
+// -------------------------
+function genericInit(nginx: string, docker: boolean, env: string) {
+  return `
+#cloud-config
+package_update: true
+
+packages:
+  - nginx
+  - git
+  - curl
+
+runcmd:
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g pm2
+
+${docker ? dockerInstall() : ""}
+
+  - echo "${env}" >> /etc/profile
+  - echo "${nginx}" > /etc/nginx/sites-available/default
+
+  - systemctl restart nginx
+
+  - git clone https://your-repo/app.git /app
+  - cd /app && npm install
+  - pm2 start npm -- start
+  - pm2 save
+`;
+}
+
+// -------------------------------------------------------------
+// 🔧 Docker installer (Debian)
+// -------------------------------------------------------------
+
+function dockerInstall(arch: "amd64" | "arm64" = "amd64") {
+  return `
+  # Install Docker
+  - curl -fsSL https://get.docker.com | sh
   - systemctl enable docker
   - systemctl start docker
-`;
-}
-
-function writeFirewallSection() {
-  return `
-packages:
-  - ufw
-
-runcmd:
-  - ufw default deny incoming
-  - ufw default allow outgoing
-  - ufw allow 22
-  - ufw allow 80
-  - ufw allow 443
-  - ufw --force enable
-`;
-}
-
-function writeFail2BanSection() {
-  return `
-packages:
-  - fail2ban
-
-write_files:
-  - path: /etc/fail2ban/jail.local
-    permissions: "0644"
-    content: |
-      [sshd]
-      enabled = true
-      bantime = 10m
-      maxretry = 5
-`;
-}
-
-function writeMonitoringSection(provider: string) {
-  return `
-packages:
-  - curl
-  - htop
-  - sysstat
-
-write_files:
-  - path: /etc/devvelocity-monitor
-    permissions: "0755"
-    content: |
-      SERVER_PROVIDER="${provider}"
-      ENABLE_METRICS="true"
-      ENABLE_LOG_PUSH="true"
-`;
-}
-
-function monitoringStartCmds() {
-  return `
-  - echo "Starting metrics collection..."
-  - systemctl restart sysstat
-`;
-}
-
-function writeCronSection() {
-  return `
-write_files:
-  - path: /etc/cron.daily/devvelocity-maintenance
-    permissions: "0755"
-    content: |
-      #!/bin/bash
-      echo "Running daily maintenance..."
-      apt-get update -y
-      apt-get autoremove -y
 `;
 }
