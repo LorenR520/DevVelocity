@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { generateQuestions, recommendPlan } from "@/ai-builder/plan-logic";
+import { generateQuestions } from "@/ai-builder/plan-logic";
+import AIBuildResult from "@/components/AIBuildResult";
 
+// ----------------------------------------
+// AI Builder Page
+// ----------------------------------------
 export default function AIBuildPage() {
   const [plan, setPlan] = useState<string>("developer");
   const [questions, setQuestions] = useState<any[]>([]);
@@ -12,7 +16,7 @@ export default function AIBuildPage() {
   const [error, setError] = useState<string | null>(null);
 
   // ----------------------------------------
-  // Load questions based on the user's plan
+  // Load questions whenever plan tier changes
   // ----------------------------------------
   useEffect(() => {
     const q = generateQuestions(plan);
@@ -24,7 +28,7 @@ export default function AIBuildPage() {
   };
 
   // ----------------------------------------
-  // Submit answers → Run AI Builder
+  // Submit the AI build request
   // ----------------------------------------
   async function submit() {
     setLoading(true);
@@ -51,6 +55,7 @@ export default function AIBuildPage() {
         setError(json.error);
       } else {
         setResult(json.output);
+        window.scrollTo({ top: 99999, behavior: "smooth" });
       }
     } catch (err: any) {
       setError(err.message);
@@ -60,35 +65,16 @@ export default function AIBuildPage() {
   }
 
   // ----------------------------------------
-  // Render Output (AI Result)
+  // Render questionnaire UI
   // ----------------------------------------
-
-  const renderOutput = () => {
-    if (!result) return null;
-
-    return (
-      <div className="mt-12 p-6 rounded-xl bg-neutral-900 border border-neutral-800 text-white">
-        <h2 className="text-3xl font-bold mb-6">Your AI-Generated Infrastructure Plan</h2>
-
-        <pre className="whitespace-pre-wrap text-sm bg-black/40 p-4 rounded-lg overflow-x-auto">
-{JSON.stringify(result, null, 2)}
-        </pre>
-      </div>
-    );
-  };
-
-  // ----------------------------------------
-  // Render questionnaire
-  // ----------------------------------------
-
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 text-white">
       <h1 className="text-3xl font-bold mb-8">AI Infrastructure Builder</h1>
 
-      {/* Plan Selector */}
-      <div className="mb-8">
+      {/* ------------------ Current Plan Selector ------------------ */}
+      <div className="mb-12">
         <label className="block text-gray-300 mb-2 font-medium">
-          Your Current Plan
+          Your Current Plan Tier
         </label>
 
         <select
@@ -101,9 +87,13 @@ export default function AIBuildPage() {
           <option value="team">Team</option>
           <option value="enterprise">Enterprise</option>
         </select>
+
+        <p className="text-gray-400 text-sm mt-2">
+          Questions & capabilities automatically adjust based on your plan.
+        </p>
       </div>
 
-      {/* Questions */}
+      {/* ------------------ Dynamic Questionnaire ------------------ */}
       <div className="space-y-8">
         {questions.map((q, index) => (
           <div
@@ -114,7 +104,10 @@ export default function AIBuildPage() {
 
             <div className="space-y-3">
               {q.options.map((opt: string) => (
-                <label key={opt} className="flex items-center gap-3 cursor-pointer">
+                <label
+                  key={opt}
+                  className="flex items-center gap-3 cursor-pointer select-none"
+                >
                   <input
                     type={q.allowMultiple ? "checkbox" : "radio"}
                     name={`q-${index}`}
@@ -144,24 +137,24 @@ export default function AIBuildPage() {
         ))}
       </div>
 
-      {/* Submit */}
+      {/* ------------------ Submit Button ------------------ */}
       <button
         onClick={submit}
         disabled={loading}
-        className="mt-8 py-2 px-6 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        className="mt-10 py-3 px-8 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
       >
-        {loading ? "Building..." : "Generate My Architecture"}
+        {loading ? "Building Your Architecture..." : "Generate My Architecture"}
       </button>
 
-      {/* Error */}
+      {/* ------------------ Error Display ------------------ */}
       {error && (
         <p className="mt-6 text-red-400 text-sm">
           {error}
         </p>
       )}
 
-      {/* Output */}
-      {renderOutput()}
+      {/* ------------------ AI Result Viewer ------------------ */}
+      {result && <AIBuildResult result={result} />}
     </main>
   );
 }
