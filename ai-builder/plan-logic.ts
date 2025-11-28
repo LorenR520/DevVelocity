@@ -14,43 +14,42 @@ export function hasFeature(planId: string, feature: string) {
   const plan = getPlan(planId);
   if (!plan) return false;
 
-  const auto = plan.automation;
   const builderLevel = plan.builder;
   const ssoLevel = plan.sso;
 
   switch (feature) {
     case "multi_cloud":
-      return plan.providers !== 1;
+      return plan.providers !== 1 && plan.providers !== "unlimited";
 
     case "failover":
-      return auto.multi_cloud_failover === true;
+      return plan.automation === "enterprise" || plan.automation === "private";
 
     case "advanced_builder":
-      return builderLevel === "advanced" || builderLevel === "enterprise" || builderLevel === "private";
+      return ["advanced", "enterprise", "private"].includes(builderLevel);
 
     case "enterprise_builder":
-      return builderLevel === "enterprise" || builderLevel === "private";
+      return ["enterprise", "private"].includes(builderLevel);
 
     case "sso_basic":
-      return ssoLevel === "basic" || ssoLevel === "advanced" || ssoLevel === "enterprise";
+      return ["basic", "advanced", "enterprise"].includes(ssoLevel);
 
     case "sso_advanced":
-      return ssoLevel === "advanced" || ssoLevel === "enterprise";
+      return ["advanced", "enterprise"].includes(ssoLevel);
 
     case "sso_enterprise":
       return ssoLevel === "enterprise";
 
     case "automations":
-      return auto.ci_cd !== "basic";
+      return plan.automation !== "basic";
 
     case "scheduled_tasks_hourly":
-      return auto.scheduled_tasks === "hourly" || auto.scheduled_tasks === "continuous";
+      return ["advanced", "enterprise", "private"].includes(plan.automation);
 
     case "scheduled_tasks_continuous":
-      return auto.scheduled_tasks === "continuous";
+      return ["enterprise", "private"].includes(plan.automation);
 
     case "observability_full":
-      return auto.observability === "full";
+      return ["enterprise", "private"].includes(plan.automation);
 
     default:
       return false;
@@ -69,6 +68,7 @@ export function getAllowedCapabilities(planId: string) {
     builder: plan.builder,
     sso: plan.sso,
     limits: plan.limits,
+    metered: plan.metered,
     automation: plan.automation,
   };
 }
@@ -83,16 +83,20 @@ export function generateQuestions(planId: string) {
 
   const q: any[] = [
     {
-      question: "What cloud provider do you want to build on?",
+      id: "cloud",
+      question: "Which cloud provider do you want to build on?",
       options: ["AWS", "Azure", "GCP", "Oracle Cloud", "DigitalOcean"],
       allowMultiple: plan.providers !== 1,
     },
     {
-      question: "What is your monthly budget for cloud and automation?",
+      id: "budget",
+      question: "What is your monthly budget for cloud + automation?",
       options: ["<$25", "$25–$100", "$100–$500", "$500–$2000", "$2000+"],
     },
     {
-      question: "What tasks do you want automated?",
+      id: "automation",
+      question: "What tasks would you like automated?",
+      allowMultiple: true,
       options: [
         "Deployments",
         "Monitoring",
@@ -101,54 +105,64 @@ export function generateQuestions(planId: string) {
         "Failover",
         "CI/CD Pipelines",
         "API Automation",
-        "Scheduled Jobs"
+        "Scheduled Jobs",
       ],
-      allowMultiple: true,
     },
     {
-      question: "How much ongoing maintenance do you want?",
+      id: "maintenance",
+      question: "How much maintenance do you want to perform?",
       options: [
         "None (fully automated)",
         "Minimal (alerts + auto-remediation)",
         "Medium (we handle upgrades)",
-        "High (I want full access)"
+        "High (I want full access)",
       ],
-    }
+    },
   ];
 
-  // ⭐ Upgrade questions for higher tiers
+  // ⭐ Add SSO questions if plan supports SSO
   if (hasFeature(planId, "sso_basic")) {
     q.push({
+      id: "sso",
       question: "Do you want SSO enabled?",
-      options: ["Email login only", "Google", "Microsoft", "Okta", "Auth0"]
+      options: ["None", "Google", "Microsoft", "Okta", "Auth0"],
     });
   }
 
+  // ⭐ Add Scheduling questions for higher tiers
   if (hasFeature(planId, "scheduled_tasks_hourly")) {
     q.push({
-      question: "Do you need scheduled tasks (cron jobs)?",
-      options: ["Every 15 minutes", "Hourly", "Daily", "Custom"]
+      id: "cron",
+      question: "Do you need scheduled tasks?",
+      options: ["Every 15 minutes", "Hourly", "Daily", "Custom"],
     });
   }
 
+  // ⭐ Multi-cloud questions
   if (hasFeature(planId, "multi_cloud")) {
     q.push({
-      question: "Do you want to deploy to multiple cloud providers?",
-      options: ["No", "Yes — deploy identical stacks", "Yes — for failover"]
+      id: "multiCloud",
+      question: "Deploy to multiple cloud providers?",
+      options: ["No", "Yes — mirrored stacks", "Yes — failover"],
     });
   }
 
+  // ⭐ Failover automation
   if (hasFeature(planId, "failover")) {
     q.push({
-      question: "Do you want cross-cloud failover automation?",
-      options: ["No", "Yes — automatic failover", "Yes — AI-directed failover"]
+      id: "failover",
+      question: "Do you want cross-cloud failover?",
+      options: ["No", "Automatic failover", "AI-directed failover"],
     });
   }
 
+  // ⭐ Enterprise-only compliance questions
   if (hasFeature(planId, "enterprise_builder")) {
     q.push({
-      question: "Do you need compliance support?",
-      options: ["SOC2", "HIPAA", "GDPR", "PCI", "FedRAMP"]
+      id: "compliance",
+      question: "What compliance frameworks do you need?",
+      options: ["SOC2", "HIPAA", "GDPR", "PCI", "FedRAMP"],
+      allowMultiple: true,
     });
   }
 
@@ -163,8 +177,9 @@ export function recommendPlan(answers: any) {
   const multiCloud = answers.multiCloud;
   const budget = answers.budget;
 
-  // Very simple logic (you can make this smarter later)
+  // Very simple logic (can evolve later)
   if (multiCloud && budget === "$2000+") return "enterprise";
+  if (answers.failover === "AI-directed failover") return "enterprise";
   if (complexity > 5) return "team";
   if (complexity > 2) return "startup";
   return "developer";
