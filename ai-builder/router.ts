@@ -1,139 +1,108 @@
-// ai-builder/router.ts
-
-import { getAllowedCapabilities, generateQuestions, recommendPlan, hasFeature } from "./plan-logic";
-import { saveAnswer, saveFinalBuild } from "./actions";
-import { generateTemplate } from "./template-engine";
+import { buildAIPrompt } from "./prompt";
+import { getAllowedCapabilities } from "./plan-logic";
+import OpenAI from "openai";
 
 /**
- * The AI Builder Flow Router
- * Controls all steps of the builder experience
+ * AI Builder Router
+ * Handles:
+ *  - answer validation
+ *  - tier limitations
+ *  - building final system prompt
+ *  - calling OpenAI
+ *  - returning full infra blueprint
  */
 
-export class AIBuildRouter {
-  user: any;
-  planId: string;
-  capabilities: any;
-  questions: any[];
+export async function runAIBuilder(answers: Record<number, any>) {
+  try {
+    // ----------------------------------------
+    // 1. Validate required fields
+    // ----------------------------------------
+    const required = ["cloud", "automation", "providers", "budget", "project"];
+    const missing = required.filter((r) => !(r in answers));
 
-  constructor(user: any) {
-    this.user = user;
-    this.planId = user?.plan_id || "developer";
-
-    // Load plan-aware limits & features
-    this.capabilities = getAllowedCapabilities(this.planId);
-
-    // Generate question list dynamically
-    this.questions = generateQuestions(this.planId);
-  }
-
-  /**
-   * Returns the generated question list for UI wizards
-   */
-  getQuestions() {
-    return this.questions;
-  }
-
-  /**
-   * Handles submitting one question answer
-   */
-  async submitAnswer(stepIndex: number, answer: any) {
-    await saveAnswer(this.user.id, stepIndex, answer);
-
-    const isLast = stepIndex === this.questions.length - 1;
-    return { nextStep: isLast ? "generate" : stepIndex + 1, finished: isLast };
-  }
-
-  /**
-   * Once all questions are answered, we build the template.
-   */
-  async finalizeBuild() {
-    const answers = await this.loadAnswers();
-
-    // -----------------------------
-    // ⭐ Check for required upgrades
-    // -----------------------------
-    const upgradeNeeded = this.checkUpgrade(answers);
-
-    if (upgradeNeeded) {
-      return { upgrade: upgradeNeeded };
+    if (missing.length > 0) {
+      return {
+        error: `Missing required fields: ${missing.join(", ")}`,
+      };
     }
 
-    // -----------------------------
-    // ⭐ Generate Cloud Templates
-    // -----------------------------
-    const output = await generateTemplate({
-      user: this.user,
-      answers,
-      capabilities: this.capabilities
-    });
+    // ----------------------------------------
+    // 2. Read plan tier from session or answers
+    // ----------------------------------------
+    const plan = answers.plan || "developer";
+    const caps = getAllowedCapabilities(plan);
 
-    // Save result
-    await saveFinalBuild(this.user.id, output);
+    // ----------------------------------------
+    // 3. Enforce provider limits
+    // ----------------------------------------
+    let validatedProviders = answers.providers || [];
+    if (caps.providers !== "unlimited" && validatedProviders.length > caps.providers) {
+      validatedProviders = validatedProviders.slice(0, caps.providers);
+    }
 
-    return { success: true, output };
-  }
+    // ----------------------------------------
+    // 4. Enforce security + SSO limits
+    // ----------------------------------------
+    let security = answers.security;
+    if (caps.sso === "none" && security?.includes("sso")) {
+      security = "email_only";
+    }
 
-  /**
-   * Load user's previous answers
-   */
-  async loadAnswers() {
-    const res = await fetch(`${process.env.APP_URL}/api/ai-builder/answers?user=${this.user.id}`);
-    const data = await res.json();
-    return data.answers || {};
-  }
-
-  /**
-   * Determines if the user requested features outside their tier
-   */
-  checkUpgrade(answers: any) {
-    const plan = this.planId;
-    const requested = {
-      multiCloud: answers.clouds?.length > 1,
-      failover: answers.failover === "automatic" || answers.failover === "ai",
-      advancedBuilder: answers.builderMode === "enterprise",
-      security: answers.security,
-      sso: answers.ssoProvider,
+    // ----------------------------------------
+    // 5. Prepare final validated answer object
+    // ----------------------------------------
+    const finalAnswers = {
+      ...answers,
+      plan,
+      providers: validatedProviders,
+      security,
     };
 
-    // Multi-cloud
-    if (requested.multiCloud && !hasFeature(plan, "multi_cloud")) {
-      return {
-        reason: "Multi-cloud deployments require Startup or higher.",
-        required: "startup"
-      };
+    // ----------------------------------------
+    // 6. Build system prompt (AI brain)
+    // ----------------------------------------
+    const systemPrompt = buildAIPrompt(finalAnswers);
+
+    // ----------------------------------------
+    // 7. OpenAI call
+    // ----------------------------------------
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
+    });
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4.1", // or your enterprise model
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "Generate the full infrastructure output now." }
+      ],
+      temperature: 0.2,
+      max_tokens: 6000,
+    });
+
+    const text = response.choices?.[0]?.message?.content || "{}";
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = { raw: text, error: "AI output was not valid JSON" };
     }
 
-    // Failover
-    if (requested.failover && !hasFeature(plan, "failover")) {
-      return {
-        reason: "Automated failover requires Team or Enterprise.",
-        required: "team"
-      };
-    }
+    // ----------------------------------------
+    // 8. Return AI output for UI consumption
+    // ----------------------------------------
+    return {
+      success: true,
+      plan,
+      capabilities: caps,
+      output: parsed,
+    };
 
-    // SSO
-    if (requested.sso && !hasFeature(plan, "sso_basic")) {
-      return {
-        reason: "SSO requires Startup or higher.",
-        required: "startup"
-      };
-    }
-
-    // Continuous scheduled tasks
-    if (answers.schedules === "continuous" && !hasFeature(plan, "scheduled_tasks_continuous")) {
-      return {
-        reason: "Continuous schedulers require Enterprise.",
-        required: "enterprise"
-      };
-    }
-
-    return null; // safe to generate
-  }
-
-  /**
-   * Suggest optimal plan after all answers
-   */
-  recommendUpgrade(answers: any) {
-    return recommendPlan(answers);
+  } catch (err: any) {
+    console.error("AI Builder Router Error:", err);
+    return {
+      error: err.message || "AI Builder failed",
+    };
   }
 }
