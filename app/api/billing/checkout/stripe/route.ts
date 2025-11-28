@@ -18,16 +18,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid planId" }, { status: 400 });
     }
 
-    // Enterprise → Contact sales instead
+    // Enterprise forces custom contact
     if (planId === "enterprise") {
       return NextResponse.json({
         url: "https://devvelocity.app/contact-enterprise",
       });
     }
 
-    // ----------------------------
-    // ⭐ Supabase: Get Auth user
-    // ----------------------------
+    // ----------------------------------
+    // ⭐ Supabase: Auth + Org
+    // ----------------------------------
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
@@ -41,9 +41,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // ----------------------------
-    // ⭐ Supabase: Organization
-    // ----------------------------
     const { data: org, error: orgErr } = await supabase
       .from("organizations")
       .select("*")
@@ -57,24 +54,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // ----------------------------
-    // ⭐ Stripe
-    // ----------------------------
+    // ----------------------------------
+    // ⭐ Stripe initialization
+    // ----------------------------------
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
       apiVersion: "2023-10-16",
     });
 
-    const stripePriceId =
-      process.env[`STRIPE_PRICE_${planId.toUpperCase()}`];
+    // Seats: dynamic or included
+    const seatCount = seats ?? plan.seats_included ?? 1;
 
-    if (!stripePriceId) {
-      return NextResponse.json(
-        { error: `Missing Stripe price for ${planId}` },
-        { status: 500 }
-      );
-    }
-
-    const quantitySeats = seats ?? plan.seats_included ?? 1;
+    // We create the price dynamically:
+    // 1. Base plan
+    // 2. Seat count multiplier for overages (Stripe handles multi-quantity)
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -83,12 +75,36 @@ export async function POST(req: Request) {
         user_id: user.id,
         org_id: org.id,
         plan_id: planId,
-        seats: quantitySeats,
+        seats: seatCount,
       },
       line_items: [
         {
-          price: stripePriceId,
+          price_data: {
+            currency: "usd",
+            recurring: { interval: "month" },
+            unit_amount: plan.price * 100,
+            product_data: {
+              name: `${plan.name} Plan`,
+              description: `${plan.providers} Providers · ${plan.builder} Builder · SSO: ${plan.sso}`,
+            },
+          },
           quantity: 1,
+        },
+        {
+          // Additional seats beyond included
+          price_data: {
+            currency: "usd",
+            recurring: { interval: "month" },
+            unit_amount: (plan.seat_price ?? 0) * 100,
+            product_data: {
+              name: "Extra Seat",
+              description: "Additional team seat",
+            },
+          },
+          quantity:
+            typeof plan.seats_included === "number"
+              ? Math.max(0, seatCount - plan.seats_included)
+              : 0,
         },
       ],
       success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
@@ -99,7 +115,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal error" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
