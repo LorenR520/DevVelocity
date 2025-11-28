@@ -1,38 +1,83 @@
+// app/api/billing/checkout/stripe/route.ts
+
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import pricing from "@/marketing/pricing.json";
 
 export async function POST(req: Request) {
-  const { plan, userId, email } = await req.json();
+  try {
+    const body = await req.json();
+    const { plan, userId, email, orgId } = body;
 
-  const selected = pricing.plans.find((p) => p.id === plan);
-  if (!selected) {
-    return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
-  }
+    if (!plan || !userId || !orgId) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
+    }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+    const selected = pricing.plans.find((p: any) => p.id === plan);
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer_email: email,
-    metadata: { userId, plan },
-    line_items: [
-      {
-        price_data: {
-          currency: "usd",
-          recurring: { interval: "month" },
-          unit_amount: selected.price * 100,
-          product_data: {
-            name: selected.name,
-            description: `${selected.providers} providers`,
-          },
-        },
-        quantity: 1,
+    if (!selected) {
+      return NextResponse.json(
+        { error: "Invalid plan" },
+        { status: 400 }
+      );
+    }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: "2023-10-16",
+    });
+
+    // Stripe price lookup
+    const stripePrice = selected.stripe_price_id;
+
+    if (!stripePrice) {
+      return NextResponse.json(
+        { error: "Stripe price ID not configured for this plan" },
+        { status: 500 }
+      );
+    }
+
+    // Create Customer (or update)
+    const customer = await stripe.customers.create({
+      email,
+      metadata: {
+        userId,
+        orgId,
+        plan,
       },
-    ],
-    success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
-    cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
-  });
+    });
 
-  return NextResponse.json({ url: session.url });
+    // Create Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customer.id,
+      line_items: [
+        {
+          price: stripePrice,
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        metadata: {
+          userId,
+          orgId,
+          plan,
+        },
+      },
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?success=1`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing?canceled=1`,
+    });
+
+    return NextResponse.json({
+      url: session.url,
+    });
+  } catch (err: any) {
+    console.error("Stripe checkout error:", err);
+    return NextResponse.json(
+      { error: err.message ?? "Stripe checkout failed" },
+      { status: 500 }
+    );
+  }
 }
