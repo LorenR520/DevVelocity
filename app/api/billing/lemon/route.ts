@@ -1,84 +1,86 @@
-// app/api/billing/lemon/route.ts
+// app/api/billing/checkout/lemon/route.ts
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const { plan, userId } = await req.json();
 
-    const event = body.meta?.event_name;
-    const data = body.data;
-    const attributes = data?.attributes;
-
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Validate webhook signature
-    const signature = req.headers.get("x-signature");
-    if (!signature || signature !== process.env.LEMON_WEBHOOK_SECRET) {
+    if (!plan || !userId) {
       return NextResponse.json(
-        { error: "Invalid webhook signature" },
-        { status: 401 }
+        { error: "Missing plan or userId" },
+        { status: 400 }
       );
     }
 
-    console.log("🔔 Lemon Squeezy webhook:", event);
-
-    // Extract subscription info
-    const userId = attributes?.user_id;
-    const status = attributes?.status;
-    const variantId = attributes?.variant_id;
-
-    if (!userId || !variantId) {
-      return NextResponse.json(
-        { success: true, message: "Ignoring — missing identifiers." }
-      );
-    }
-
-    // Map variant → plan ID
-    const lemonToPlan: Record<string, string> = {
-      [process.env.LEMON_VARIANT_DEVELOPER!]: "developer",
-      [process.env.LEMON_VARIANT_STARTUP!]: "startup",
-      [process.env.LEMON_VARIANT_TEAM!]: "team",
-      [process.env.LEMON_VARIANT_ENTERPRISE!]: "enterprise",
+    // Map plan → Lemon variant
+    const planToVariant: Record<string, string> = {
+      developer: process.env.LEMON_VARIANT_DEVELOPER!,
+      startup: process.env.LEMON_VARIANT_STARTUP!,
+      team: process.env.LEMON_VARIANT_TEAM!,
+      enterprise: process.env.LEMON_VARIANT_ENTERPRISE!,
     };
 
-    const mappedPlan = lemonToPlan[String(variantId)] ?? null;
+    const variantId = planToVariant[plan];
 
-    if (!mappedPlan) {
-      console.warn("⚠ Unknown Lemon variant:", variantId);
-      return NextResponse.json({ success: true });
+    if (!variantId) {
+      return NextResponse.json(
+        { error: "Unknown plan" },
+        { status: 400 }
+      );
     }
 
-    // Update Supabase auth user metadata
-    await supabase.auth.admin.updateUserById(userId, {
-      app_metadata: {
-        billing_provider: "lemon",
-        plan: mappedPlan,
-        status,
-        variant_id: variantId,
-      },
-    });
-
-    // Handle cancellation
-    if (status === "canceled") {
-      await supabase.auth.admin.updateUserById(userId, {
-        app_metadata: {
-          billing_provider: "none",
-          plan: "free",
-          status: "canceled",
+    const payload = {
+      data: {
+        type: "checkouts",
+        attributes: {
+          custom_price: null,
+          expires_at: null,
+          preview: false,
         },
-      });
+        relationships: {
+          store: { data: { type: "stores", id: process.env.LEMON_STORE_ID } },
+          variant: { data: { type: "variants", id: variantId } },
+        },
+      },
+    };
+
+    const res = await fetch(
+      `${process.env.LEMON_CHECKOUT_URL_BASE}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.LEMON_API_KEY}`,
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const json = await res.json();
+
+    const checkoutUrl =
+      json?.data?.attributes?.url ?? null;
+
+    if (!checkoutUrl) {
+      console.error("Lemon checkout creation failed:", json);
+      return NextResponse.json(
+        { error: "Failed to create Lemon checkout" },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ success: true });
+    // Attach ?userId= so webhook can map user → subscription
+    const finalUrl = `${checkoutUrl}?userId=${userId}`;
+
+    return NextResponse.json({
+      url: finalUrl,
+    });
   } catch (err: any) {
-    console.error("Lemon webhook error:", err);
+    console.error("Lemon checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Webhook error" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
