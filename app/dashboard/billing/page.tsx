@@ -1,19 +1,17 @@
-// app/dashboard/billing/page.tsx
-
 "use client";
 
 import { useEffect, useState } from "react";
-import UpgradeButtons from "@/components/UpgradeButtons";
+import pricing from "@/marketing/pricing.json";
 
 export default function BillingDashboard() {
-  const [billing, setBilling] = useState<any>(null);
+  const [org, setOrg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const res = await fetch("/api/billing/summary");
+      const res = await fetch("/api/user/org");
       const data = await res.json();
-      setBilling(data);
+      setOrg(data.org || null);
       setLoading(false);
     }
     load();
@@ -21,93 +19,97 @@ export default function BillingDashboard() {
 
   if (loading) {
     return (
-      <div className="text-center text-gray-300 py-20">
+      <main className="max-w-4xl mx-auto px-6 py-20 text-white text-center">
         Loading billing dashboard...
-      </div>
+      </main>
     );
   }
 
+  if (!org) {
+    return (
+      <main className="max-w-3xl mx-auto px-6 py-16 text-white text-center">
+        <h1 className="text-2xl font-bold mb-4">No Organization Found</h1>
+        <p className="text-gray-400">
+          Create an organization to access billing.
+        </p>
+      </main>
+    );
+  }
+
+  const plan = pricing.plans.find((p) => p.id === org.plan_id);
+
   return (
-    <main className="max-w-3xl mx-auto px-6 py-16 text-white space-y-10">
-      {/* HEADER */}
-      <h1 className="text-3xl font-bold">Billing</h1>
+    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
+      <h1 className="text-3xl font-bold mb-8">Billing</h1>
 
       {/* CURRENT PLAN */}
-      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 mb-8">
         <h2 className="text-xl font-semibold mb-2">Current Plan</h2>
-
-        <p className="text-gray-300 text-lg font-medium">
-          {billing.plan?.name} —{" "}
-          <span className="text-blue-400">
-            {billing.plan?.display_price}
-          </span>
+        <p className="text-gray-300 mb-2">
+          {plan ? plan.name : "Unknown Plan"}
         </p>
 
-        <p className="text-gray-400 text-sm mt-2">
-          Billing Provider: {billing.billing_provider || "unknown"}
+        <p className="text-4xl font-bold text-blue-400 mb-4">
+          {plan?.display_price ?? "$—"}
         </p>
-      </section>
-
-      {/* SEAT INFO */}
-      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
-        <h2 className="text-xl font-semibold mb-3">Seats</h2>
-
-        <p className="text-gray-300">
-          Seats used: {billing.seats_used} / {billing.seats_included}
-        </p>
-
-        {billing.seat_overage_pending > 0 && (
-          <p className="text-red-400 mt-2">
-            Pending overage charges: ${billing.seat_overage_pending.toFixed(2)}
-          </p>
-        )}
 
         <a
-          href="/dashboard/team"
-          className="text-blue-400 underline text-sm mt-3 block"
+          href="/dashboard/billing/upgrade"
+          className="inline-block mt-2 px-4 py-2 bg-blue-600 rounded-md hover:bg-blue-700"
         >
-          Manage Team
+          Change Plan
         </a>
       </section>
 
-      {/* USAGE */}
-      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
-        <h2 className="text-xl font-semibold mb-3">Usage</h2>
+      {/* OVERAGE SECTION */}
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 mb-8">
+        <h2 className="text-xl font-semibold mb-2">Usage Overage</h2>
 
-        <p className="text-gray-300">
-          View build minutes, pipelines, and API call usage.
+        <p className="text-gray-300 mb-4">
+          Excess usage beyond your included quotas is billed automatically.
         </p>
 
-        {billing.usage_overage_pending > 0 && (
-          <p className="text-red-400 mt-2">
-            Pending usage overages: $
-            {billing.usage_overage_pending.toFixed(2)}
-          </p>
-        )}
+        <p className="text-3xl font-bold text-yellow-400">
+          ${org.pending_overage_amount?.toFixed(2) ?? "0.00"}
+        </p>
 
         <a
           href="/dashboard/billing/usage"
-          className="text-blue-400 underline text-sm mt-3 block"
+          className="inline-block mt-4 px-4 py-2 bg-blue-600 rounded-md hover:bg-blue-700"
         >
           View Usage
         </a>
       </section>
 
-      {/* INVOICES */}
-      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
-        <h2 className="text-xl font-semibold mb-3">Invoices</h2>
+      {/* SEAT BILLING */}
+      <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800 mb-8">
+        <h2 className="text-xl font-semibold mb-2">Team / Seats</h2>
+
+        <p className="text-gray-300">
+          {org.seat_count ?? 0} seats used • {plan?.seats_included} included
+        </p>
+
         <a
-          href="/dashboard/billing/invoices"
-          className="text-blue-400 underline text-sm"
+          href="/dashboard/team"
+          className="inline-block mt-4 px-4 py-2 bg-blue-600 rounded-md hover:bg-blue-700"
         >
-          View all invoices
+          Manage Team
         </a>
       </section>
 
-      {/* UPGRADE */}
+      {/* INVOICES */}
       <section className="bg-neutral-900 p-6 rounded-xl border border-neutral-800">
-        <h2 className="text-xl font-semibold mb-4">Upgrade Plan</h2>
-        <UpgradeButtons />
+        <h2 className="text-xl font-semibold mb-2">Invoices</h2>
+        <p className="text-gray-300 mb-4">
+          Download and view monthly invoices, overage adjustments, and receipts.
+        </p>
+
+        <a
+          href="/dashboard/billing/invoices"
+          className="inline-block px-4 py-2 bg-blue-600 rounded-md hover:bg-blue-700"
+        >
+          View Invoices
+        </a>
       </section>
     </main>
   );
