@@ -1,31 +1,39 @@
 import { NextResponse } from "next/server";
+import pricing from "@/marketing/pricing.json";
 import Stripe from "stripe";
+
+export const runtime = "edge"; // Cloudflare-compatible
 
 export async function POST(req: Request) {
   try {
-    const { planId, seats = 1, orgId } = await req.json();
+    const { planId, userId, orgId, seats = 1 } = await req.json();
 
-    if (!planId) {
+    if (!planId || !userId || !orgId) {
       return NextResponse.json(
-        { error: "Missing planId" },
+        { error: "Missing planId, userId or orgId" },
         { status: 400 }
       );
     }
 
-    // Map plans → Stripe price IDs
-    const priceMap: Record<string, string> = {
+    // Load pricing.json plan
+    const plan = pricing.plans.find((p) => p.id === planId);
+    if (!plan) {
+      return NextResponse.json({ error: "Invalid planId" }, { status: 400 });
+    }
+
+    // Stripe PriceID mapping from ENV variables
+    const stripePriceMap: Record<string, string> = {
       developer: process.env.STRIPE_PRICE_DEVELOPER!,
       startup: process.env.STRIPE_PRICE_STARTUP!,
       team: process.env.STRIPE_PRICE_TEAM!,
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE!,
     };
 
-    const priceId = priceMap[planId];
-
+    const priceId = stripePriceMap[planId];
     if (!priceId) {
       return NextResponse.json(
-        { error: "Invalid planId" },
-        { status: 400 }
+        { error: "Missing Stripe price ID for plan" },
+        { status: 500 }
       );
     }
 
@@ -33,32 +41,37 @@ export async function POST(req: Request) {
       apiVersion: "2023-10-16",
     });
 
+    // For enterprise, enforce custom sales flow
+    if (planId === "enterprise") {
+      return NextResponse.json({
+        error: "Enterprise plans require custom quote",
+        contact: `${process.env.APP_URL}/contact`,
+      });
+    }
+
+    // Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-
-      // Metadata passed to Stripe → returned on webhook → written into Supabase
       metadata: {
-        plan_id: planId,
-        org_id: orgId ?? "",
-        seats: String(seats),
+        userId,
+        orgId,
+        planId,
+        seats,
       },
-
+      subscription_data: {
+        metadata: {
+          userId,
+          orgId,
+          planId,
+          seats,
+        },
+      },
       line_items: [
         {
           price: priceId,
           quantity: 1,
         },
       ],
-
-      // Stripe will generate additional seat billing via your seat engine
-      subscription_data: {
-        metadata: {
-          plan_id: planId,
-          org_id: orgId ?? "",
-          seats: String(seats),
-        },
-      },
-
       success_url: `${process.env.APP_URL}/dashboard/billing?success=1`,
       cancel_url: `${process.env.APP_URL}/dashboard/billing?canceled=1`,
     });
@@ -67,7 +80,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("Stripe checkout error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Server error" },
+      { error: err.message ?? "Stripe Checkout Failed" },
       { status: 500 }
     );
   }
