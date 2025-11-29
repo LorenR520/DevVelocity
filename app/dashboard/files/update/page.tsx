@@ -1,28 +1,39 @@
 "use client";
 
 import { useState } from "react";
-import AIBuildResult from "@/components/AIBuildResult";
+import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/ssr";
+import { getPlan } from "@/ai-builder/plan-logic";
 
-export default function UpdateSavedFilePage() {
+export default function UpdateFilePage() {
+  const router = useRouter();
+
+  const [oldFile, setOldFile] = useState<string>("");
   const [plan, setPlan] = useState("developer");
-  const [pasted, setPasted] = useState("");
+  const [orgId, setOrgId] = useState<string>("");
+  const [upgraded, setUpgraded] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit() {
+  // -----------------------------------------------------
+  // Submit → API call → AI Upgrader
+  // -----------------------------------------------------
+  async function upgradeFile() {
     setLoading(true);
     setError(null);
-    setResult(null);
+    setUpgraded(null);
 
     try {
-      const res = await fetch("/api/ai-builder/update", {
+      const res = await fetch("/api/ai-builder/upgrade-file", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pastedFile: pasted,
+          oldFile: safeParse(oldFile),
           plan,
+          org_id: orgId,
         }),
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
 
       const json = await res.json();
@@ -30,8 +41,7 @@ export default function UpdateSavedFilePage() {
       if (json.error) {
         setError(json.error);
       } else {
-        setResult(json.output);
-        window.scrollTo({ top: 99999, behavior: "smooth" });
+        setUpgraded(json.upgraded);
       }
     } catch (err: any) {
       setError(err.message);
@@ -40,69 +50,119 @@ export default function UpdateSavedFilePage() {
     setLoading(false);
   }
 
+  // -----------------------------------------------------
+  // Save upgraded JSON → files + version history
+  // -----------------------------------------------------
+  async function saveFile() {
+    if (!upgraded) return;
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    // Save new version
+    const { data, error } = await supabase
+      .from("files")
+      .insert({
+        org_id: orgId,
+        filename: upgraded.summary || "Upgraded Architecture File",
+        json_content: upgraded,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      setError("Error saving file: " + error.message);
+      return;
+    }
+
+    router.push("/dashboard/files");
+  }
+
+  // -----------------------------------------------------
+  // Safely parse JSON
+  // -----------------------------------------------------
+  function safeParse(text: string) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text };
+    }
+  }
+
+  // -----------------------------------------------------
+  // UI
+  // -----------------------------------------------------
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-6">Update Existing AI Build</h1>
+      <h1 className="text-3xl font-bold mb-8">Update Architecture File</h1>
 
-      <p className="text-gray-400 mb-8">
-        Paste your old DevVelocity AI output below. We’ll automatically detect
-        missing sections, modernize your architecture, enforce plan limits, apply
-        upgrades, and generate a fully updated build.
+      <p className="text-gray-300 mb-6">
+        Paste your old architecture file below. DevVelocity AI will analyze it,
+        detect outdated patterns, apply the newest best practices, and recommend
+        upgrades based on your plan tier.
       </p>
 
-      {/* ---- Plan Selector ---- */}
-      <div className="mb-8">
-        <label className="block text-gray-300 mb-2 font-medium">
-          Your Current Plan
-        </label>
-
-        <select
-          value={plan}
-          onChange={(e) => setPlan(e.target.value)}
-          className="bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg text-white"
-        >
-          <option value="developer">Developer</option>
-          <option value="startup">Startup</option>
-          <option value="team">Team</option>
-          <option value="enterprise">Enterprise</option>
-        </select>
-
-        <p className="text-sm text-gray-500 mt-2">
-          Tier limits affect modernization, automation, and provider options.
-        </p>
-      </div>
-
-      {/* ---- Paste Box ---- */}
-      <div className="mb-8">
-        <label className="block text-gray-300 mb-2 font-medium">
-          Paste Old Build JSON
-        </label>
-
-        <textarea
-          value={pasted}
-          onChange={(e) => setPasted(e.target.value)}
-          className="w-full h-72 bg-neutral-900 border border-neutral-800 rounded-lg p-4 font-mono text-sm text-gray-200"
-          placeholder="Paste your previous AI build JSON here..."
-        />
-      </div>
-
-      <button
-        onClick={submit}
-        disabled={loading}
-        className="py-3 px-8 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+      {/* Plan Selector */}
+      <label className="block mb-3 font-medium">Your Plan Tier</label>
+      <select
+        value={plan}
+        onChange={(e) => setPlan(e.target.value)}
+        className="bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg mb-6"
       >
-        {loading ? "Updating Build…" : "Update Build"}
+        <option value="developer">Developer</option>
+        <option value="startup">Startup</option>
+        <option value="team">Team</option>
+        <option value="enterprise">Enterprise</option>
+      </select>
+
+      {/* Org ID */}
+      <label className="block mb-3 font-medium">Organization ID</label>
+      <input
+        value={orgId}
+        onChange={(e) => setOrgId(e.target.value)}
+        placeholder="your org_id"
+        className="w-full bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg mb-6"
+      />
+
+      {/* Old File Textarea */}
+      <label className="block mb-3 font-medium">Paste Old File JSON</label>
+      <textarea
+        value={oldFile}
+        onChange={(e) => setOldFile(e.target.value)}
+        rows={14}
+        placeholder="Paste JSON here..."
+        className="w-full bg-neutral-900 border border-neutral-800 p-4 rounded-lg font-mono text-sm"
+      />
+
+      {/* Upgrade Button */}
+      <button
+        onClick={upgradeFile}
+        disabled={loading}
+        className="mt-6 py-2 px-6 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+      >
+        {loading ? "Upgrading..." : "Upgrade Architecture"}
       </button>
 
-      {/* ---- Error ---- */}
-      {error && (
-        <p className="mt-6 text-red-400 text-sm">{error}</p>
-      )}
+      {/* Error */}
+      {error && <p className="mt-4 text-red-400">{error}</p>}
 
-      {/* ---- Updated Output ---- */}
-      {result && (
-        <div className="mt-10">
-          <AIBuildResult result={result} />
+      {/* AI Result */}
+      {upgraded && (
+        <div className="mt-12 p-6 bg-neutral-900 border border-neutral-800 rounded-xl">
+          <h2 className="text-2xl font-bold mb-4">Upgraded File</h2>
+
+          <pre className="bg-black/40 p-4 rounded-lg text-sm whitespace-pre-wrap overflow-x-auto">
+            {JSON.stringify(upgraded, null, 2)}
+          </pre>
+
+          <button
+            onClick={saveFile}
+            className="mt-6 py-2 px-6 bg-green-600 hover:bg-green-700 rounded-lg font-semibold"
+          >
+            Save Updated File
+          </button>
         </div>
       )}
     </main>
