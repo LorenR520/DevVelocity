@@ -1,96 +1,107 @@
+// app/api/ai-builder/upgrade-file/route.ts
+
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
-import pricing from "@/marketing/pricing.json";
+import { upgradeArchitectureFile } from "@/server/ai/file-upgrader";
+import { createClient } from "@supabase/ssr";
+import { getPlan } from "@/ai-builder/plan-logic";
 
 export async function POST(req: Request) {
   try {
-    const { fileContent, plan } = await req.json();
+    const body = await req.json();
+    const { oldFile, plan, org_id } = body;
 
-    if (!fileContent) {
+    if (!oldFile) {
       return NextResponse.json(
-        { error: "Missing fileContent" },
+        { error: "No file provided for upgrade." },
         { status: 400 }
       );
     }
 
-    // ----------------------------
-    // 🧠 Extract metadata from file
-    // ----------------------------
+    if (!plan) {
+      return NextResponse.json(
+        { error: "Missing plan tier." },
+        { status: 400 }
+      );
+    }
 
-    const extracted = extractBuildMetadata(fileContent);
-
-    // Create answers object for AI Builder reuse
-    const answers: Record<number, any> = {
-      0: extracted.cloud,
-      1: extracted.automation,
-      2: extracted.providers,
-      3: extracted.maintenance,
-      4: extracted.budget,
-      5: extracted.security,
-      6: extracted.buildType,
-      7: extracted.project,
-      plan: plan || "developer", // fallback
-    };
-
-    // Build the AI system prompt with new constraints
-    const prompt = buildAIPrompt(answers);
-
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-
-    // ----------------------------------------------
-    // 🧠 Send to OpenAI for NEW Build Regeneration
-    // ----------------------------------------------
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [
-        {
-          role: "system",
-          content:
-            prompt +
-            "\n\n# IMPORTANT\nUser provided an OLD file. You MUST detect outdated components and regenerate a fresh up-to-date architecture. Recommend upgrades if needed.\n",
+    // 🔐 Create supabase client via cookies (Cloudflare-safe)
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name) {
+            return req.headers.get("Cookie") || "";
+          },
         },
-        {
-          role: "user",
-          content: fileContent,
-        },
-      ],
-      temperature: 0.4,
+      }
+    );
+
+    // -----------------------------------------------
+    // validate user session + org_id
+    // -----------------------------------------------
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    if (!org_id) {
+      return NextResponse.json(
+        { error: "Missing organization ID." },
+        { status: 400 }
+      );
+    }
+
+    // -----------------------------------------------
+    // Validate plan
+    // -----------------------------------------------
+    const planInfo = getPlan(plan);
+    if (!planInfo) {
+      return NextResponse.json(
+        { error: "Invalid plan tier." },
+        { status: 400 }
+      );
+    }
+
+    // -----------------------------------------------
+    // Perform upgrade using AI
+    // -----------------------------------------------
+    const result = await upgradeArchitectureFile(oldFile, plan);
+
+    if (result.error) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: 500 }
+      );
+    }
+
+    // -----------------------------------------------
+    // Log activity usage (counts against plan)
+    // -----------------------------------------------
+    await supabase
+      .from("ai_activity_log")
+      .insert({
+        org_id,
+        user_id: user.id,
+        action: "upgrade_file",
+        metadata: { old_size: JSON.stringify(oldFile).length },
+      });
+
+    return NextResponse.json({
+      success: true,
+      upgraded: result.upgraded,
     });
-
-    const output =
-      completion.choices?.[0]?.message?.content ||
-      "AI failed to generate output.";
-
-    return NextResponse.json({ output });
   } catch (err: any) {
-    console.error("upgrade-file error", err);
+    console.error("Upgrade File API Error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message || "Unknown error" },
       { status: 500 }
     );
   }
-}
-
-/**
- * Attempts to extract structure from old DevVelocity build files
- */
-function extractBuildMetadata(file: string) {
-  const safe = (pattern: RegExp, fallback: any) => {
-    const found = file.match(pattern);
-    return found ? found[1] : fallback;
-  };
-
-  return {
-    cloud: safe(/Cloud Provider:\s*(.*)/i, "AWS"),
-    automation: safe(/Automation:\s*(.*)/i, "basic"),
-    providers: safe(/Providers:\s*\[(.*)\]/i, ["AWS"]),
-    maintenance: safe(/Maintenance:\s*(.*)/i, "Minimal"),
-    budget: safe(/Budget:\s*(.*)/i, "$25–$100"),
-    security: safe(/Security:\s*(.*)/i, "basic"),
-    buildType: safe(/Build Type:\s*(.*)/i, "API Backend"),
-    project: safe(/Project Description:\s*([\s\S]*)/i, "General project"),
-  };
 }
