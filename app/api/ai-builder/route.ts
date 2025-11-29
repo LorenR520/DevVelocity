@@ -4,32 +4,34 @@ import { NextResponse } from "next/server";
 import { runBuilderEngine } from "@/server/ai/builder-engine";
 
 /**
- * DevVelocity AI Builder
- * POST /api/ai-builder
- *
- * Accepts:
- *   { answers: { ... }, plan: "developer|startup|team|enterprise" }
- *
- * Returns:
- *   { ok: true, output: {...} }
+ * AI Infrastructure Builder
+ * ---------------------------------
+ * Receives the questionnaire answers and
+ * generates the infrastructure plan.
  */
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
     if (!body.answers) {
       return NextResponse.json(
-        { error: "Missing answers payload." },
+        { error: "Missing answers payload" },
         { status: 400 }
       );
     }
 
-    // Run main AI builder engine
-    const result = await runBuilderEngine(body.answers);
+    const plan = body.answers.plan ?? "developer";
+
+    const result = await runBuilderEngine({
+      mode: "build",
+      answers: body.answers,
+      plan,
+    });
 
     if (!result.ok) {
       return NextResponse.json(
-        { error: result.error },
+        { error: result.error || "AI build failed" },
         { status: 500 }
       );
     }
@@ -37,11 +39,11 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       output: result.output,
-      caps: result.caps,
+      upgradeHints: result.upgradeHints || [],
     });
   } catch (err: any) {
     return NextResponse.json(
-      { error: "Unexpected server error: " + err.message },
+      { error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
