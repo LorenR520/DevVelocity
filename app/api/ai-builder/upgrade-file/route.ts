@@ -4,99 +4,64 @@ import { NextResponse } from "next/server";
 import { runBuilderEngine } from "@/server/ai/builder-engine";
 
 /**
- * POST /api/ai-builder/upgrade-file
- *
- * Accepts a pasted old DevVelocity file and attempts to:
- *  - parse it
- *  - validate structure
- *  - detect outdated configs
- *  - regenerate an updated architecture
- *  - enforce plan tier limits
- *  - suggest upgrades if needed
+ * AI File Upgrade Endpoint
+ * -------------------------------------------------------
+ * Users paste an OLD infrastructure file (JSON).
+ * We:
+ *   - validate it
+ *   - run tier checks
+ *   - compare to latest template models
+ *   - generate an improved + updated file
+ *   - recommend plan upgrades if needed
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileContent, plan } = await req.json();
+    const body = await req.json();
+    const { file, plan } = body;
 
-    if (!fileContent || typeof fileContent !== "string") {
+    if (!file) {
       return NextResponse.json(
-        { error: "Missing or invalid fileContent." },
+        { error: "Missing file contents for upgrade" },
         { status: 400 }
       );
     }
 
-    const safePlan = plan || "developer";
-
-    // ---------------------------------------
-    // STEP 1 — Try to parse the pasted JSON
-    // ---------------------------------------
-    let parsed;
-    try {
-      parsed = JSON.parse(fileContent);
-    } catch {
+    if (!plan) {
       return NextResponse.json(
-        {
-          error:
-            "The file you provided is not valid JSON. Please paste a full valid DevVelocity build file.",
-        },
+        { error: "Missing plan tier" },
         { status: 400 }
       );
     }
 
-    // ---------------------------------------
-    // STEP 2 — Detect the structure (old versions allowed)
-    // ---------------------------------------
-    const coreSections = [
-      "summary",
-      "architecture",
-      "cloud_init",
-      "docker_compose",
-      "pipelines",
-      "security_model",
-      "budget_projection",
-      "maintenance_plan",
-    ];
-
-    const hasMinimumStructure = coreSections.some((k) => parsed[k]);
-
-    if (!hasMinimumStructure) {
-      return NextResponse.json(
-        {
-          error:
-            "The file does not appear to be a DevVelocity-generated architecture file.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // ---------------------------------------
-    // STEP 3 — Run the AI upgrade engine
-    // ---------------------------------------
+    // ---------------------------------------------
+    // Run upgrade mode inside the AI builder engine
+    // ---------------------------------------------
     const result = await runBuilderEngine({
       mode: "upgrade",
-      oldFile: parsed,
-      plan: safePlan,
+      file,
+      plan,
     });
 
     if (!result.ok) {
       return NextResponse.json(
-        { error: result.error },
-        { status: 400 }
+        { error: result.error || "Upgrade failed" },
+        { status: 500 }
       );
     }
 
-    // ---------------------------------------
-    // STEP 4 — Return upgraded architecture
-    // ---------------------------------------
     return NextResponse.json({
       ok: true,
-      output: result.output,
-      upgradeHints: result.upgradeHints || [],
+      updated: result.output,        // New file
+      upgradeHints: result.upgradeHints || [], // Upsell suggestions
+      diff: result.diff || null,     // Optional: structured diff
     });
   } catch (err: any) {
+    console.error("Upgrade file error:", err);
     return NextResponse.json(
-      { error: err.message || "Server error" },
+      {
+        error: err.message || "Internal server error",
+      },
       { status: 500 }
     );
   }
