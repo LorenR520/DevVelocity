@@ -1,86 +1,128 @@
 // server/ai/builder-engine.ts
 
-import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
-import { getAllowedCapabilities } from "@/ai-builder/plan-logic";
-
-// Cloudflare supports the official OpenAI client:
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
 /**
- * Main entrypoint for generating infrastructure builds.
- * This is the core engine behind DevVelocity AI.
+ * DevVelocity AI Builder Engine
+ *
+ * Provides two modes:
+ *  - "build" → generate a fresh architecture from questionnaire answers
+ *  - "upgrade" → update an older saved architecture file
+ *
+ * Works on Cloudflare Pages (no Node SDK dependencies).
  */
-export async function runBuilderEngine(answers: Record<number, any>) {
+
+import { buildAIPrompt } from "@/ai-builder/prompt";
+
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+
+interface BuilderRequest {
+  mode: "build" | "upgrade";
+  answers?: any;
+  oldFile?: any;
+  plan: string;
+}
+
+export async function runBuilderEngine(input: BuilderRequest) {
   try {
-    // -----------------------------------------------
-    // 1. Enforce plan limits
-    // -----------------------------------------------
-    const plan = answers.plan ?? "developer";
-    const caps = getAllowedCapabilities(plan);
+    let systemPrompt = "";
+    let userPrompt = "";
 
-    // -----------------------------------------------
-    // 2. Build the system prompt
-    // -----------------------------------------------
-    const systemPrompt = buildAIPrompt(answers);
+    // --------------------------------------------
+    // MODE: BUILD (normal questionnaire generation)
+    // --------------------------------------------
+    if (input.mode === "build") {
+      systemPrompt = buildAIPrompt(input.answers || {});
+      userPrompt = "Generate the architecture based on the answers.";
+    }
 
-    // -----------------------------------------------
-    // 3. Call OpenAI with full JSON mode
-    // -----------------------------------------------
-    const completion = await client.chat.completions.create({
-      model: "gpt-4.1", // Cloudflare-compatible model
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: `Generate a full infrastructure plan using my inputs: ${JSON.stringify(
-            answers
-          )}`,
-        },
-      ],
+    // --------------------------------------------
+    // MODE: UPGRADE (pasted older file)
+    // --------------------------------------------
+    if (input.mode === "upgrade") {
+      systemPrompt = `
+You are DevVelocity AI Upgrade Engine.
+
+Your job is to analyze an older DevVelocity architecture file and:
+
+- detect outdated cloud-init
+- detect old docker-compose patterns
+- modernize CI/CD pipelines
+- update best practices per provider
+- enforce the user's plan tier limits
+- recommend when their architecture exceeds their plan
+- produce a brand new architecture (same JSON layout)
+- NEVER remove required sections
+- ALWAYS produce runnable code
+- ALWAYS optimize for the original architecture's intent
+
+Plan Tier: ${input.plan}
+
+Old File:
+${JSON.stringify(input.oldFile, null, 2)}
+
+If the file is missing sections, rebuild them automatically.
+If the build exceeds tier limits, downgrade it AND recommend an upgrade.
+`;
+
+      userPrompt = "Upgrade and regenerate this architecture now.";
+    }
+
+    // --------------------------------------------
+    // Execute edge-compatible OpenAI call
+    // --------------------------------------------
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        ok: false,
+        error: "OPENAI_API_KEY is missing.",
+      };
+    }
+
+    const response = await fetch(OPENAI_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1",
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        temperature: 0.1,
+      }),
     });
 
-    const text = completion.choices[0].message?.content;
-
-    if (!text) {
+    if (!response.ok) {
+      const txt = await response.text();
       return {
         ok: false,
-        error: "AI returned no content.",
+        error: "OpenAI API error: " + txt,
       };
     }
 
-    // -----------------------------------------------
-    // 4. Parse JSON (model is instructed to output valid JSON)
-    // -----------------------------------------------
-    let output: any = null;
-    try {
-      output = JSON.parse(text);
-    } catch (err: any) {
-      return {
-        ok: false,
-        error: "Invalid JSON returned from AI.",
-        raw: text,
-      };
-    }
+    const data = await response.json();
+    const output = JSON.parse(data.choices[0].message.content);
 
-    // -----------------------------------------------
-    // 5. Return result to API route
-    // -----------------------------------------------
+    // --------------------------------------------
+    // Done
+    // --------------------------------------------
     return {
       ok: true,
       output,
-      caps,
+      upgradeHints: output?.upgrade_paths || [],
     };
   } catch (err: any) {
     return {
       ok: false,
-      error: err.message,
+      error: err.message || "Builder Engine Error",
     };
   }
 }
