@@ -2,59 +2,85 @@
 
 import OpenAI from "openai";
 import { buildAIPrompt } from "@/ai-builder/prompt";
+import { getAllowedCapabilities } from "@/ai-builder/plan-logic";
 
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("⚠️ Missing OPENAI_API_KEY — AI Builder will fail until set.");
-}
-
-const openai = new OpenAI({
+// Cloudflare supports the official OpenAI client:
+const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-export async function runAIBuild(answers: any) {
+/**
+ * Main entrypoint for generating infrastructure builds.
+ * This is the core engine behind DevVelocity AI.
+ */
+export async function runBuilderEngine(answers: Record<number, any>) {
   try {
-    // Build full DevVelocity system prompt
-    const prompt = buildAIPrompt(answers);
+    // -----------------------------------------------
+    // 1. Enforce plan limits
+    // -----------------------------------------------
+    const plan = answers.plan ?? "developer";
+    const caps = getAllowedCapabilities(plan);
 
-    // Call OpenAI Completion
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1",
+    // -----------------------------------------------
+    // 2. Build the system prompt
+    // -----------------------------------------------
+    const systemPrompt = buildAIPrompt(answers);
+
+    // -----------------------------------------------
+    // 3. Call OpenAI with full JSON mode
+    // -----------------------------------------------
+    const completion = await client.chat.completions.create({
+      model: "gpt-4.1", // Cloudflare-compatible model
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: prompt,
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: `Generate a full infrastructure plan using my inputs: ${JSON.stringify(
+            answers
+          )}`,
         },
       ],
-      temperature: 0.2,
-      max_tokens: 6000,
     });
 
-    const msg = response.choices?.[0]?.message?.content;
+    const text = completion.choices[0].message?.content;
 
-    if (!msg) {
+    if (!text) {
       return {
-        error: "AI returned no output",
+        ok: false,
+        error: "AI returned no content.",
       };
     }
 
-    // AI returns JSON — parse and return
-    let parsed;
+    // -----------------------------------------------
+    // 4. Parse JSON (model is instructed to output valid JSON)
+    // -----------------------------------------------
+    let output: any = null;
     try {
-      parsed = JSON.parse(msg);
-    } catch (err) {
+      output = JSON.parse(text);
+    } catch (err: any) {
       return {
-        error: "Failed to parse AI output as JSON",
-        raw: msg,
+        ok: false,
+        error: "Invalid JSON returned from AI.",
+        raw: text,
       };
     }
 
+    // -----------------------------------------------
+    // 5. Return result to API route
+    // -----------------------------------------------
     return {
-      output: parsed,
+      ok: true,
+      output,
+      caps,
     };
   } catch (err: any) {
-    console.error("AI Builder Engine Error:", err);
     return {
-      error: err.message || "Unknown AI error",
+      ok: false,
+      error: err.message,
     };
   }
 }
