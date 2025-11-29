@@ -1,62 +1,47 @@
-import { NextResponse } from "next/server";
-import { buildAIPrompt } from "@/ai-builder/prompt";
-import OpenAI from "openai";
+// app/api/ai-builder/route.ts
 
-// ------------------------------
-// API Route: /api/ai-builder
-// ------------------------------
+import { NextResponse } from "next/server";
+import { runBuilderEngine } from "@/server/ai/builder-engine";
+
+/**
+ * DevVelocity AI Builder
+ * POST /api/ai-builder
+ *
+ * Accepts:
+ *   { answers: { ... }, plan: "developer|startup|team|enterprise" }
+ *
+ * Returns:
+ *   { ok: true, output: {...} }
+ */
 export async function POST(req: Request) {
   try {
-    const { answers } = await req.json();
+    const body = await req.json();
 
-    if (!answers) {
+    if (!body.answers) {
       return NextResponse.json(
-        { error: "No answers received" },
+        { error: "Missing answers payload." },
         { status: 400 }
       );
     }
 
-    // ---------------------------------------
-    // Build prompt from questionnaire answers
-    // ---------------------------------------
-    const prompt = buildAIPrompt(answers);
+    // Run main AI builder engine
+    const result = await runBuilderEngine(body.answers);
 
-    // ---------------------------------------
-    // Initialize the AI model
-    // (For now with OpenAI — pluggable later)
-    // ---------------------------------------
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [
-        {
-          role: "system",
-          content: prompt,
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 6000,
-    });
-
-    const text = completion.choices[0].message?.content || "";
-
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = { raw: text, error: "Could not parse JSON output" };
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
-      output: parsed,
+      ok: true,
+      output: result.output,
+      caps: result.caps,
     });
   } catch (err: any) {
-    console.error("AI Builder API Error:", err);
     return NextResponse.json(
-      { error: err.message || "Internal Server Error" },
+      { error: "Unexpected server error: " + err.message },
       { status: 500 }
     );
   }
