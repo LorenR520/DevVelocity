@@ -1,5 +1,5 @@
 // app/api/ai-builder/upgrade-file/route.ts
-
+.
 import { NextResponse } from "next/server";
 import { runAIUpgrade } from "@/server/ai/builder-engine";
 import { createClient } from "@supabase/supabase-js";
