@@ -4,15 +4,18 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * LIST ALL FILES FOR USER'S ORG
  *
- * Returned:
- * - id, filename, description
- * - created_at, updated_at
- * - version_count
- * - last_modified_by
+ * This endpoint powers:
+ *  - /dashboard/files
+ *  - update/edit page preloading
+ *  - version history modal
+ *  - restore-file operation
+ *  - AI upgrade (needs fileId)
  *
- * Tier Restrictions:
- * - Developer → returns empty list (no access to File Portal)
- * - Startup / Team / Enterprise → full access
+ * Tier Rules:
+ *  - Developer     → no access (returns empty list + upgrade CTA)
+ *  - Startup       → full access
+ *  - Team          → full access
+ *  - Enterprise    → full access + future multi-org support
  */
 
 export async function POST(req: Request) {
@@ -26,26 +29,30 @@ export async function POST(req: Request) {
       );
     }
 
+    const tier = plan ?? "developer";
+
     // --------------------------------------------------
-    // 1. Developer tier has NO access to saved files
+    // 1. Developer Tier → Blocked
     // --------------------------------------------------
-    if (plan === "developer") {
+    if (tier === "developer") {
       return NextResponse.json({
         files: [],
-        message: "Upgrade required to access saved infrastructure files.",
+        upgrade_required: true,
+        message: "The File Portal is available on Startup, Team, and Enterprise plans.",
       });
     }
 
     // --------------------------------------------------
-    // 2. Supabase client
+    // 2. Supabase service-role client
+    //    (Required for reading version counts)
     // --------------------------------------------------
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_URL!,               // Use secure internal URL
+      process.env.SUPABASE_SERVICE_ROLE_KEY!   // Required for RLS bypass + joins
     );
 
     // --------------------------------------------------
-    // 3. Fetch files
+    // 3. Fetch all active (non-deleted) files
     // --------------------------------------------------
     const { data: files, error: filesErr } = await supabase
       .from("files")
@@ -54,9 +61,9 @@ export async function POST(req: Request) {
         id,
         filename,
         description,
+        org_id,
         created_at,
         updated_at,
-        org_id,
         deleted_at,
         last_modified_by,
         version_count: file_version_history(count)
@@ -67,6 +74,7 @@ export async function POST(req: Request) {
       .order("updated_at", { ascending: false });
 
     if (filesErr) {
+      console.error("Supabase filesErr:", filesErr);
       return NextResponse.json(
         { error: "Failed to load files" },
         { status: 500 }
@@ -75,7 +83,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       files: files ?? [],
+      upgrade_required: false,
     });
+
   } catch (err: any) {
     console.error("File list error:", err);
     return NextResponse.json(
