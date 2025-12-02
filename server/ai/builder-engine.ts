@@ -1,79 +1,76 @@
-import { buildAIPrompt } from "@/ai-builder/prompt";
-import { getAllowedCapabilities } from "@/ai-builder/plan-logic";
 import OpenAI from "openai";
+import { buildAIPrompt } from "@/ai-builder/prompt";
+
+export const runtime = "edge";
 
 /**
- * Core AI Engine for DevVelocity
- * This takes user answers → validates by plan → generates infra plan
+ * DevVelocity — AI Builder Engine
+ * -----------------------------------
+ * This file powers the AI generation for:
+ *  - new infrastructure builds
+ *  - automation generation
+ *  - cloud-init
+ *  - docker-compose
+ *  - pipelines
+ *  - maintenance plans
+ *  - networking
+ *  - security
+ *  - upgrade recommendations
+ *
+ * Model: GPT-5.1-Pro (full unrestricted capabilities)
  */
 
-export async function runAIBuild(answers: Record<number, any>) {
+export async function generateArchitecture(answers: Record<string, any>) {
   try {
-    // -----------------------------
-    // 1. Validate tier limitations
-    // -----------------------------
-    const plan = answers.plan ?? "developer";
-    const caps = getAllowedCapabilities(plan);
+    // Validate answers exist
+    if (!answers || Object.keys(answers).length === 0) {
+      throw new Error("Missing answers payload for AI Builder.");
+    }
 
-    // Attach validated capabilities for runtime context
-    answers._validatedCapabilities = caps;
-
-    // -----------------------------
-    // 2. Build the system prompt
-    // -----------------------------
+    // Construct system prompt based on user answers
     const systemPrompt = buildAIPrompt(answers);
 
-    // -----------------------------
-    // 3. Initialize OpenAI client
-    // -----------------------------
+    // Initialize GPT-5.1-Pro client
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY!,
     });
 
-    // -----------------------------
-    // 4. Call the model
-    // -----------------------------
+    // Run the model
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini", // best value/speed model for infra output
-      temperature: 0.2,
-      max_tokens: 3500,
+      model: "gpt-5.1-pro",
+      temperature: 0.15,
+      max_tokens: 9000,
       messages: [
         {
           role: "system",
           content: systemPrompt,
         },
+        {
+          role: "user",
+          content: "Generate the full architecture output now.",
+        },
       ],
     });
 
-    const raw = completion.choices[0].message?.content?.trim() ?? "";
+    const result = completion.choices?.[0]?.message?.content;
 
-    // -----------------------------
-    // 5. Parse JSON output safely
-    // -----------------------------
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      console.error("❌ Failed to parse JSON:", err, raw);
-
-      return {
-        error: "AI output was not valid JSON. Please try again.",
-        raw,
-      };
+    if (!result) {
+      throw new Error("Empty model output.");
     }
 
-    // -----------------------------
-    // 6. Final Output
-    // -----------------------------
-    return {
-      success: true,
-      output: parsed,
-    };
+    // Try parsing into JSON (preferred format)
+    try {
+      const parsed = JSON.parse(result);
+      return parsed;
+    } catch {
+      // fallback raw output — better than failing
+      return result;
+    }
   } catch (err: any) {
-    console.error("❌ AI Builder Engine Error:", err);
+    console.error("AI Builder Engine Error:", err);
 
     return {
-      error: err.message ?? "Unexpected error running AI Builder.",
+      error: err?.message ?? "Unknown AI engine error",
     };
   }
 }
