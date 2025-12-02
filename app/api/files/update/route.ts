@@ -1,94 +1,121 @@
+// app/api/files/update/route.ts
+
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { recordActivity } from "@/lib/billing/recordActivity";
+import { createClient } from "@supabase/supabase-js";
+
+/**
+ * UPDATE EXISTING SAVED FILE
+ * --------------------------------------------------------
+ * Required Inputs:
+ *  {
+ *    fileId: string,
+ *    orgId: string,
+ *    plan: string,
+ *    newContent: string,
+ *    userId: string
+ *  }
+ *
+ * Behavior:
+ *  - Developer tier → ❌ blocked
+ *  - Startup / Team / Enterprise → allowed
+ *  - Creates new version in file_version_history
+ *  - Updates main file record
+ *  - Logs usage
+ */
 
 export async function POST(req: Request) {
   try {
-    const supabase = createClient();
-    const { id, content } = await req.json();
+    const { fileId, orgId, plan, newContent, userId } = await req.json();
 
-    if (!id || !content) {
+    if (!fileId || !orgId || !newContent || !userId) {
       return NextResponse.json(
-        { error: "Missing file ID or content." },
+        { error: "Missing required fields (fileId, orgId, newContent, userId)" },
         { status: 400 }
       );
     }
 
-    // 1. Ensure user is authenticated
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
-
-    if (authErr || !user) {
+    // --------------------------------------------------
+    // 1. Developer tier — blocked from editing
+    // --------------------------------------------------
+    if (plan === "developer") {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        {
+          error: "Upgrade required to edit saved infrastructure files.",
+          upgrade_required: true,
+        },
         { status: 401 }
       );
     }
 
-    // Fetch file metadata
+    // --------------------------------------------------
+    // 2. Supabase client (Service Role)
+    // --------------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // --------------------------------------------------
+    // 3. Get current file data
+    // --------------------------------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
-      .eq("id", id)
+      .eq("id", fileId)
+      .eq("org_id", orgId)
       .single();
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or inaccessible." },
+        { error: "File not found or access denied" },
         { status: 404 }
       );
     }
 
-    // 2. Create version history entry BEFORE updating main file
-    const { error: versionErr } = await supabase
-      .from("file_version_history")
-      .insert({
-        file_id: id,
-        org_id: file.org_id,
-        previous_content: file.content,
-        created_by: user.id,
-      });
+    const oldContent = file.content;
 
-    if (versionErr) {
-      return NextResponse.json(
-        { error: "Failed to create version history." },
-        { status: 500 }
-      );
-    }
+    // --------------------------------------------------
+    // 4. Insert new version into file_version_history
+    // --------------------------------------------------
+    await supabase.from("file_version_history").insert({
+      file_id: fileId,
+      org_id: orgId,
+      previous_content: oldContent,
+      new_content: newContent,
+      change_summary: "Manual update via File Portal",
+    });
 
-    // 3. Update the file content
-    const { error: updateErr } = await supabase
+    // --------------------------------------------------
+    // 5. Update main file record
+    // --------------------------------------------------
+    await supabase
       .from("files")
       .update({
-        content,
+        content: newContent,
+        last_modified_by: userId,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", id);
+      .eq("id", fileId);
 
-    if (updateErr) {
-      return NextResponse.json(
-        { error: "Failed to update file." },
-        { status: 500 }
-      );
-    }
-
-    // 4. Record user activity (counts as billable action)
-    await recordActivity({
-      userId: user.id,
-      orgId: file.org_id,
-      type: "file_update",
-      metadata: { fileId: id },
+    // --------------------------------------------------
+    // 6. Meter usage
+    // --------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      pipelines_run: 1,     // editing infra is treated as a pipeline event
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
     });
 
     return NextResponse.json({
       success: true,
-      message: "File updated successfully.",
+      message: "File updated successfully",
     });
-  } catch (error: any) {
+  } catch (err: any) {
+    console.error("File update error:", err);
     return NextResponse.json(
-      { error: error.message ?? "Unknown server error." },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
