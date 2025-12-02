@@ -3,74 +3,133 @@ import { buildAIPrompt } from "@/ai-builder/prompt";
 
 export const runtime = "edge";
 
+// ------------------------------
+// Initialize GPT-5.1-Pro Client
+// ------------------------------
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
+
 /**
- * DevVelocity — AI Builder Engine
- * -----------------------------------
- * This file powers the AI generation for:
- *  - new infrastructure builds
- *  - automation generation
- *  - cloud-init
- *  - docker-compose
- *  - pipelines
- *  - maintenance plans
- *  - networking
- *  - security
- *  - upgrade recommendations
- *
- * Model: GPT-5.1-Pro (full unrestricted capabilities)
+ * ============================================================
+ * AI BUILDER ENGINE
+ * - Generates brand-new infra architecture
+ * ============================================================
  */
-
-export async function generateArchitecture(answers: Record<string, any>) {
+export async function runAIBuild(answers: any) {
   try {
-    // Validate answers exist
-    if (!answers || Object.keys(answers).length === 0) {
-      throw new Error("Missing answers payload for AI Builder.");
-    }
+    const prompt = buildAIPrompt(answers);
 
-    // Construct system prompt based on user answers
-    const systemPrompt = buildAIPrompt(answers);
-
-    // Initialize GPT-5.1-Pro client
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-
-    // Run the model
     const completion = await client.chat.completions.create({
       model: "gpt-5.1-pro",
-      temperature: 0.15,
-      max_tokens: 9000,
+      response_format: { type: "json_object" },
+      temperature: 0.2,
       messages: [
         {
           role: "system",
-          content: systemPrompt,
+          content: "You are DevVelocity AI, a senior DevOps architect.",
         },
         {
           role: "user",
-          content: "Generate the full architecture output now.",
+          content: prompt,
         },
       ],
     });
 
-    const result = completion.choices?.[0]?.message?.content;
-
-    if (!result) {
-      throw new Error("Empty model output.");
+    const output = completion.choices[0].message?.content;
+    if (!output) {
+      return { error: "AI returned no output." };
     }
 
-    // Try parsing into JSON (preferred format)
-    try {
-      const parsed = JSON.parse(result);
-      return parsed;
-    } catch {
-      // fallback raw output — better than failing
-      return result;
-    }
+    return JSON.parse(output);
   } catch (err: any) {
-    console.error("AI Builder Engine Error:", err);
+    console.error("AI Builder Error:", err);
+    return { error: err.message ?? "AI builder failed." };
+  }
+}
 
-    return {
-      error: err?.message ?? "Unknown AI engine error",
-    };
+/**
+ * ============================================================
+ * UPGRADE EXISTING FILE ENGINE
+ * - Accepts pasted JSON / YAML / text infra
+ * - Auto-corrects
+ * - Modernizes
+ * - Re-generates missing components
+ * - Suggests upgrades
+ * ============================================================
+ */
+export async function upgradeExistingFile({
+  plan,
+  fileContent,
+}: {
+  plan: string;
+  fileContent: string;
+}) {
+  try {
+    const systemPrompt = `
+You are DevVelocity AI — a DevOps architect who upgrades outdated infra files.
+
+Your responsibilities:
+- detect format (JSON, YAML, text, cloud-init, pipelines, docker-compose)
+- correct syntax
+- rewrite into a modern unified DevVelocity format
+- regenerate cloud-init
+- regenerate docker-compose
+- regenerate pipelines
+- enforce plan tier limits
+- suggest upgrades
+- document breaking changes
+- return clean JSON ALWAYS
+
+Rules:
+1. NEVER output invalid JSON.
+2. NEVER output markdown.
+3. ALWAYS output valid DevVelocity structure.
+4. ALWAYS modernize best practices.
+5. ALWAYS enforce plan tier limits.
+6. ALWAYS include upgrade recommendations when features exceed the plan.
+`;
+
+    const userPrompt = `
+PLAN TIER: ${plan}
+------------------------------------
+USER PASTED FILE:
+------------------------------------
+${fileContent}
+------------------------------------
+
+Return JSON matching:
+
+{
+  "upgraded_file": "...",
+  "architecture": "...",
+  "cloud_init": "...",
+  "docker_compose": "...",
+  "pipelines": "...",
+  "changes_applied": "...",
+  "upgrade_suggestions": "...",
+  "warnings": "..."
+}
+`;
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-5.1-pro",
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    const output = completion.choices[0].message?.content;
+    if (!output) {
+      return { error: "AI returned no output" };
+    }
+
+    return JSON.parse(output);
+  } catch (err: any) {
+    console.error("Upgrade Engine Error:", err);
+    return { error: err.message ?? "Upgrade engine failed." };
   }
 }
