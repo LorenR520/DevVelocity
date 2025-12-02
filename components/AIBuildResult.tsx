@@ -1,123 +1,92 @@
 "use client";
 
 import { useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/cjs/prism";
+import { tomorrow } from "react-syntax-highlighter/dist/cjs/styles/prism";
 
-interface AIBuildResultProps {
-  result: any;
-}
+export default function AIBuildResult({ result }: { result: any }) {
+  const [copied, setCopied] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
-/**
- * Renders collapsible sections with clean formatting
- */
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(true);
+  const content = JSON.stringify(result, null, 2);
 
-  return (
-    <div className="border border-neutral-800 rounded-xl bg-neutral-900 overflow-hidden mb-6">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full px-4 py-3 flex justify-between items-center bg-neutral-800 hover:bg-neutral-700 transition text-white font-semibold"
-      >
-        {title}
-        <span>{open ? "▾" : "▸"}</span>
-      </button>
+  // -------------------------------------------
+  // 📋 Copy to clipboard
+  // -------------------------------------------
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-      {open && (
-        <div className="px-4 py-4 text-gray-300 text-sm">{children}</div>
-      )}
-    </div>
-  );
-}
+  // -------------------------------------------
+  // 🔄 Send file to Upgrade API
+  // -------------------------------------------
+  const handleUpgrade = async () => {
+    setUpgradeOpen(true);
 
-/**
- * Renders AI Builder output with deep formatting
- */
-export default function AIBuildResult({ result }: AIBuildResultProps) {
-  if (!result) return null;
+    const res = await fetch("/api/ai-builder/upgrade-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldContent: content }),
+    });
 
-  const pretty = (v: any) => JSON.stringify(v, null, 2);
+    const json = await res.json();
+    if (json.upgraded) {
+      window.localStorage.setItem("devvelocity-upgraded-file", json.upgraded);
+      alert("Your file has been upgraded and saved!");
+    }
 
-  const field = (name: string) =>
-    result[name] ? (
-      <Section title={name.replace(/_/g, " ").toUpperCase()}>
-        {typeof result[name] === "string" ? (
-          <SyntaxHighlighter language="bash" style={oneDark}>
-            {result[name]}
-          </SyntaxHighlighter>
-        ) : (
-          <SyntaxHighlighter language="json" style={oneDark}>
-            {pretty(result[name])}
-          </SyntaxHighlighter>
-        )}
-      </Section>
-    ) : null;
+    setUpgradeOpen(false);
+  };
 
   return (
-    <div id="ai-build-result" className="mt-16">
-      <h2 className="text-3xl font-bold mb-6 text-white">
-        Your AI-Generated Architecture
-      </h2>
+    <div className="mt-12 p-6 rounded-xl bg-neutral-900 border border-neutral-800 text-white">
+      <h2 className="text-3xl font-bold mb-6">AI-Generated Infrastructure Plan</h2>
 
-      {/* RAW JSON fallback for debugging */}
-      {result.error && (
-        <Section title="⚠ RAW OUTPUT (ERROR)">
-          <p className="text-red-400 mb-2">{result.error}</p>
-          <SyntaxHighlighter language="json" style={oneDark}>
-            {pretty(result.raw)}
-          </SyntaxHighlighter>
-        </Section>
-      )}
-
-      {/* Summary */}
-      {field("summary")}
-
-      {/* Architecture */}
-      {field("architecture")}
-
-      {/* Cloud-init */}
-      {field("cloud_init")}
-
-      {/* Docker Compose */}
-      {field("docker_compose")}
-
-      {/* Pipelines */}
-      {result.pipelines && (
-        <Section title="PIPELINES">
-          <SyntaxHighlighter language="json" style={oneDark}>
-            {pretty(result.pipelines)}
-          </SyntaxHighlighter>
-        </Section>
-      )}
-
-      {/* Maintenance */}
-      {field("maintenance_plan")}
-
-      {/* Security */}
-      {field("security_model")}
-
-      {/* SSO */}
-      {field("sso_recommendations")}
-
-      {/* Budget */}
-      {field("budget_projection")}
-
-      {/* Upgrade */}
-      {field("upgrade_paths")}
-
-      {/* Next steps */}
-      {field("next_steps")}
-
-      <div className="text-center mt-10 text-gray-400 text-sm">
-        Powered by <span className="text-blue-400">DevVelocity AI Builder</span>
+      {/* Outdated Warning */}
+      <div className="p-4 mb-6 rounded-lg bg-yellow-900/40 border border-yellow-700 text-yellow-300">
+        ⚠️ This file may become outdated when DevVelocity updates templates.
+        <button
+          onClick={handleUpgrade}
+          className="ml-4 px-3 py-1 bg-yellow-600 hover:bg-yellow-700 rounded text-sm font-medium"
+        >
+          Update via AI
+        </button>
       </div>
+
+      <div className="relative">
+        {/* Copy Button */}
+        <button
+          onClick={handleCopy}
+          className="absolute right-3 top-3 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs z-10"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+
+        {/* AI Output */}
+        <SyntaxHighlighter
+          language="json"
+          style={tomorrow}
+          wrapLines={true}
+          wrapLongLines={true}
+          customStyle={{
+            background: "rgba(0,0,0,0.4)",
+            padding: "16px",
+            borderRadius: "8px",
+            fontSize: "13px",
+          }}
+        >
+          {content}
+        </SyntaxHighlighter>
+      </div>
+
+      {/* Upgrade Spinner */}
+      {upgradeOpen && (
+        <div className="mt-6 text-blue-400 text-sm animate-pulse">
+          Upgrading your file with DevVelocity AI…
+        </div>
+      )}
     </div>
   );
 }
