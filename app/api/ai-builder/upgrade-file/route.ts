@@ -1,117 +1,135 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import pricing from "@/marketing/pricing.json";
-import { buildAIPrompt } from "@/ai-builder/prompt";
+import { rateLimitCheck } from "@/server/rate-limit";
 
 // ------------------------------
-// Helper: Detect plan from old build file
+// 🔐 OpenAI Client (GPT-5.1-PRO)
 // ------------------------------
-function detectPlanFromBuild(input: string): string {
-  const lower = input.toLowerCase();
-
-  if (lower.includes("enterprise")) return "enterprise";
-  if (lower.includes("team")) return "team";
-  if (lower.includes("startup")) return "startup";
-
-  return "developer"; // default for older builds
-}
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
 
 // ------------------------------
-// Helper: Extract metadata heuristically
-// (AI will refine this)
-// ------------------------------
-function extractBuildContext(input: string) {
-  return {
-    cloud: /aws|azure|gcp|oracle|digitalocean/i.exec(input)?.[0] ?? "unknown",
-    providers:
-      input.match(/providers:\s*(.*)/i)?.[1]?.split(/[, ]+/) ?? ["unknown"],
-    buildType:
-      /docker|container|vm|serverless/i.exec(input)?.[0] ?? "unknown",
-    maintenance:
-      /maintenance:\s*(low|medium|high|none)/i.exec(input)?.[1] ?? "unknown",
-    automation:
-      /ci\/cd|pipelines|auto-update|automation/i.test(input)
-        ? "advanced"
-        : "basic",
-  };
-}
-
-// ------------------------------
-// Main Route
+// POST /api/ai-builder/upgrade-file
 // ------------------------------
 export async function POST(req: Request) {
   try {
-    const { fileContent } = await req.json();
+    const { fileContent, plan } = await req.json();
 
     if (!fileContent) {
       return NextResponse.json(
-        { error: "Missing fileContent" },
+        { error: "Missing fileContent input." },
         { status: 400 }
       );
     }
 
-    const plan = detectPlanFromBuild(fileContent);
-    const context = extractBuildContext(fileContent);
-
-    // Build contextual prompt with tier-aware restrictions
-    const aiPrompt = buildAIPrompt({
-      0: context.cloud,
-      1: context.automation,
-      2: context.providers,
-      3: context.maintenance,
-      4: "$100–$500",
-      5: "basic",
-      6: context.buildType,
-      7: fileContent,
-      plan,
-    });
-
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [
-        { role: "system", content: aiPrompt },
-        { role: "user", content: fileContent },
-      ],
-      temperature: 0,
-    });
-
-    const rawOutput = completion.choices?.[0]?.message?.content;
-
-    if (!rawOutput) {
+    // ------------------------------
+    // 🔐 Rate Limiting
+    // ------------------------------
+    const rateExceeded = await rateLimitCheck("ai-upgrade-file");
+    if (rateExceeded) {
       return NextResponse.json(
-        { error: "AI returned no output" },
+        { error: "Rate limit exceeded. Try again later." },
+        { status: 429 }
+      );
+    }
+
+    // ------------------------------
+    // 🧠 Build System Prompt
+    // ------------------------------
+    const systemPrompt = `
+You are DevVelocity AI — an enterprise DevOps architect.
+
+Your job is to analyze an OLD DevVelocity Infrastructure File and modernize it:
+
+- apply up-to-date 2025 DevOps best practices  
+- update cloud-init, docker-compose, and pipelines  
+- refactor outdated patterns  
+- improve automation and uptime  
+- enhance security and SSO if allowed by plan  
+- optimize multi-cloud or single-cloud selection  
+- identify deprecated methods and replace with new ones  
+- improve cost-efficiency  
+- annotate improvements in comments  
+
+# PLAN RESTRICTIONS
+You MUST follow all feature limits for the user's plan: ${plan}
+
+- Developer → 1 provider only, basic automation  
+- Startup → up to 3 providers, advanced automation  
+- Team → up to 7 providers, enterprise automation  
+- Enterprise → unlimited providers, private automation, full security
+
+NEVER exceed plan limits.
+ALWAYS recommend upgrades if limitations prevent optimal output.
+
+# INPUT FILE (OLD VERSION)
+${fileContent}
+
+# OUTPUT FORMAT (JSON EXACTLY)
+
+{
+  "summary": "...",
+  "breaking_changes": [...],
+  "improvements": [...],
+  "updated_architecture": "...",
+  "updated_cloud_init": "...",
+  "updated_docker_compose": "...",
+  "updated_pipelines": {
+     "provider": "...",
+     "automation": "..."
+  },
+  "security_upgrades": "...",
+  "upgrade_recommendations": "...",
+  "final_output_file": "..." 
+}
+
+Respond ONLY in JSON. Do not include backticks.
+`;
+
+    // ------------------------------
+    // 🤖 GPT-5.1-PRO Call
+    // ------------------------------
+    const response = await client.chat.completions.create({
+      model: "gpt-5.1-pro",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: "Analyze and upgrade the provided infrastructure file.",
+        },
+      ],
+      max_tokens: 8000,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+    });
+
+    // ------------------------------
+    // Parse JSON Output
+    // ------------------------------
+    let output: any = null;
+    try {
+      output = JSON.parse(response.choices[0].message.content || "{}");
+    } catch (err) {
+      return NextResponse.json(
+        { error: "AI returned invalid JSON format." },
         { status: 500 }
       );
     }
 
-    // Attempt to parse JSON output
-    let parsedOutput: any = null;
-
-    try {
-      parsedOutput = JSON.parse(rawOutput);
-    } catch {
-      // If it's not JSON, return raw text for debugging
-      return NextResponse.json({
-        provider: "ai",
-        raw: rawOutput,
-        warning: "Output was not valid JSON",
-      });
-    }
-
-    return NextResponse.json({
-      provider: "ai",
-      planDetected: plan,
-      upgrade: parsedOutput.upgrade_paths ?? null,
-      output: parsedOutput,
-    });
-  } catch (err: any) {
-    console.error("Upgrade-file route error:", err);
+    // ------------------------------
+    // Return Success
+    // ------------------------------
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      {
+        success: true,
+        output,
+      },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message || "Unexpected server error." },
       { status: 500 }
     );
   }
