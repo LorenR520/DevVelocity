@@ -1,37 +1,52 @@
-// app/dashboard/ai-builder/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { generateQuestions } from "@/ai-builder/plan-logic";
-import ResultViewer from "@/components/ResultViewer";
+import AIBuildResult from "@/components/AIBuildResult";
 
-// ----------------------------------------
-// AI Builder Page
-// ----------------------------------------
-export default function AIBuildPage() {
+export default function AIBuildDashboardPage() {
   const [plan, setPlan] = useState<string>("developer");
+  const [loadingPlan, setLoadingPlan] = useState(true);
+
   const [questions, setQuestions] = useState<any[]>([]);
   const [answers, setAnswers] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ----------------------------------------
-  // Load questions when plan tier changes
-  // ----------------------------------------
+  // -------------------------
+  // Fetch user plan from cookie
+  // -------------------------
   useEffect(() => {
-    const q = generateQuestions(plan);
-    setQuestions(q);
-    setAnswers({}); // reset answers when plan changes
-  }, [plan]);
+    const cookie = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("user_plan="));
+
+    if (cookie) {
+      setPlan(cookie.split("=")[1]);
+    }
+
+    setLoadingPlan(false);
+  }, []);
+
+  // -------------------------
+  // Load questions based on plan
+  // -------------------------
+  useEffect(() => {
+    if (!loadingPlan) {
+      const q = generateQuestions(plan);
+      setQuestions(q);
+    }
+  }, [plan, loadingPlan]);
 
   const updateAnswer = (id: number, value: any) => {
     setAnswers((prev) => ({ ...prev, [id]: value }));
   };
 
-  // ----------------------------------------
-  // Submit → AI Builder Engine (API route)
-  // ----------------------------------------
+  // -------------------------
+  // Submit to AI Builder
+  // -------------------------
   async function submit() {
     setLoading(true);
     setError(null);
@@ -57,11 +72,7 @@ export default function AIBuildPage() {
         setError(json.error);
       } else {
         setResult(json.output);
-
-        // smooth scroll to result
-        setTimeout(() => {
-          window.scrollTo({ top: 99999, behavior: "smooth" });
-        }, 100);
+        window.scrollTo({ top: 99999, behavior: "smooth" });
       }
     } catch (err: any) {
       setError(err.message);
@@ -70,36 +81,45 @@ export default function AIBuildPage() {
     setLoading(false);
   }
 
-  // ----------------------------------------
-  // Render UI
-  // ----------------------------------------
+  // -------------------------
+  // Upgrade Gate
+  // -------------------------
+  if (plan === "developer") {
+    return (
+      <div className="text-white p-10 max-w-3xl mx-auto">
+        <h1 className="text-3xl font-bold mb-4">AI Builder</h1>
+        <p className="text-gray-400 mb-6">
+          Your current plan does not include AI Builder. Upgrade to access the full
+          architecture generator, automation builder, cloud-init engine, and
+          docker orchestration system.
+        </p>
+
+        <Link
+          href="/upgrade?from=ai-builder"
+          className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        >
+          Upgrade to Unlock AI Builder
+        </Link>
+      </div>
+    );
+  }
+
+  // -------------------------
+  // Main Builder UI
+  // -------------------------
   return (
     <main className="max-w-4xl mx-auto px-6 py-16 text-white">
       <h1 className="text-3xl font-bold mb-8">AI Infrastructure Builder</h1>
 
-      {/* ------------------ Current Plan Selector ------------------ */}
-      <div className="mb-12">
-        <label className="block text-gray-300 mb-2 font-medium">
-          Your Current Plan Tier
-        </label>
+      {/* Paste Previous File */}
+      <Link
+        href="/dashboard/files/update?mode=paste"
+        className="block mb-10 p-4 rounded-lg bg-neutral-900 border border-neutral-800 hover:border-blue-600 text-blue-400 text-sm font-semibold"
+      >
+        Paste an Existing DevVelocity File → Update with AI
+      </Link>
 
-        <select
-          value={plan}
-          onChange={(e) => setPlan(e.target.value)}
-          className="bg-neutral-900 border border-neutral-800 px-4 py-2 rounded-lg text-white"
-        >
-          <option value="developer">Developer</option>
-          <option value="startup">Startup</option>
-          <option value="team">Team</option>
-          <option value="enterprise">Enterprise</option>
-        </select>
-
-        <p className="text-gray-400 text-sm mt-2">
-          Questions & capabilities automatically adjust based on your plan.
-        </p>
-      </div>
-
-      {/* ------------------ Dynamic Questionnaire ------------------ */}
+      {/* Questions */}
       <div className="space-y-8">
         {questions.map((q, index) => (
           <div
@@ -143,7 +163,7 @@ export default function AIBuildPage() {
         ))}
       </div>
 
-      {/* ------------------ Submit Button ------------------ */}
+      {/* Submit */}
       <button
         onClick={submit}
         disabled={loading}
@@ -152,15 +172,11 @@ export default function AIBuildPage() {
         {loading ? "Building Your Architecture..." : "Generate My Architecture"}
       </button>
 
-      {/* ------------------ Error Display ------------------ */}
-      {error && (
-        <p className="mt-6 text-red-400 text-sm">
-          {error}
-        </p>
-      )}
+      {/* Error */}
+      {error && <p className="mt-6 text-red-400 text-sm">{error}</p>}
 
-      {/* ------------------ AI Result Viewer ------------------ */}
-      {result && <ResultViewer result={result} />}
+      {/* AI Output */}
+      {result && <AIBuildResult result={result} />}
     </main>
   );
 }
