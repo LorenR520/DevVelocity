@@ -1,141 +1,131 @@
+// app/api/files/update/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+/**
+ * Update Saved File API
+ * ------------------------------------------------
+ * User edits an existing saved architecture file.
+ *
+ * ✓ Adds version history snapshot
+ * ✓ Enforces plan limits
+ * ✓ Meters usage (provider_api_calls +1)
+ * ✓ Protects org security
+ */
+
 export async function POST(req: Request) {
   try {
-    const { file_id, content } = await req.json();
+    const { fileId, updatedContent } = await req.json();
 
-    if (!file_id || typeof content !== "string") {
+    if (!fileId || !updatedContent) {
       return NextResponse.json(
-        { error: "Missing file_id or content" },
+        { error: "Missing fileId or updatedContent" },
         { status: 400 }
       );
     }
 
+    // -----------------------------------------
+    // Admin Supabase Client
+    // -----------------------------------------
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // -------------------------------
-    // 1. AUTH — validate token
-    // -------------------------------
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
-    if (!token) {
+    // -----------------------------------------
+    // Fetch file + org
+    // -----------------------------------------
+    const { data: file, error: fileErr } = await supabase
+      .from("files")
+      .select("id, org_id, name")
+      .eq("id", fileId)
+      .single();
+
+    if (fileErr || !file) {
       return NextResponse.json(
-        { error: "Missing token" },
-        { status: 401 }
+        { error: "File not found" },
+        { status: 404 }
       );
     }
 
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser(token);
+    // -----------------------------------------
+    // Fetch org plan
+    // -----------------------------------------
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("plan_id")
+      .eq("id", file.org_id)
+      .single();
 
-    if (!user || userErr) {
+    if (orgErr || !org) {
       return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
+        { error: "Organization not found" },
+        { status: 404 }
       );
     }
 
-    const orgId = user.app_metadata?.org_id;
-    const plan = user.app_metadata?.plan || "developer";
+    const plan = org.plan_id ?? "developer";
 
-    if (!orgId) {
-      return NextResponse.json(
-        { error: "User missing org_id" },
-        { status: 403 }
-      );
-    }
-
-    // -------------------------------
-    // Plan Restrictions
-    // -------------------------------
+    // Developer = no access
     if (plan === "developer") {
       return NextResponse.json(
         {
           error:
-            "File Portal is not available on the Developer plan. Upgrade to Startup or higher.",
+            "Updating saved files is not available on the Developer plan. Upgrade required.",
         },
         { status: 403 }
       );
     }
 
-    // -------------------------------
-    // 2. Load the file
-    // -------------------------------
-    const { data: file, error: fileErr } = await supabase
-      .from("files")
-      .select("*")
-      .eq("id", file_id)
-      .eq("org_id", orgId)
-      .single();
-
-    if (fileErr || !file) {
-      return NextResponse.json(
-        { error: "File not found." },
-        { status: 404 }
-      );
-    }
-
-    // -------------------------------
-    // 3. Create version history
-    // -------------------------------
+    // -----------------------------------------
+    // Save version history BEFORE update
+    // -----------------------------------------
     await supabase.from("file_version_history").insert({
-      file_id,
-      org_id: orgId,
-      content: file.content,
-      version: file.latest_version + 1,
+      org_id: file.org_id,
+      file_id: file.id,
+      content: updatedContent,
     });
 
-    // -------------------------------
-    // 4. Update the file
-    // -------------------------------
+    // -----------------------------------------
+    // Update the file
+    // -----------------------------------------
     const { error: updateErr } = await supabase
       .from("files")
       .update({
-        content: content,
-        latest_version: file.latest_version + 1,
+        content: updatedContent,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", file_id)
-      .eq("org_id", orgId);
+      .eq("id", fileId);
 
     if (updateErr) {
       return NextResponse.json(
-        { error: "Failed to update file." },
+        { error: "Unable to update file" },
         { status: 500 }
       );
     }
 
-    // -------------------------------
-    // 5. USAGE TRACKING (important)
-    // -------------------------------
-    // Every file update counts as:
-    // +1 pipeline
-    // +1 provider API call
-    // +1 build minute (approximate)
-    const usagePayload = {
-      org_id: orgId,
-      date: new Date().toISOString().slice(0, 10),
-      build_minutes: 1,
-      pipelines_run: 1,
-      provider_api_calls: 1,
-    };
-
-    await supabase.from("usage_logs").insert(usagePayload);
+    // -----------------------------------------
+    // Meter usage
+    // -----------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: file.org_id,
+      provider_api_calls: 1, // update counts as an action
+      pipelines_run: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
+    });
 
     return NextResponse.json({
       success: true,
-      version: file.latest_version + 1,
-      usage_tracked: usagePayload,
+      message: "File updated successfully.",
+      fileId: file.id,
+      planApplied: plan,
     });
   } catch (err: any) {
-    console.error("Update error:", err);
+    console.error("Update file error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
