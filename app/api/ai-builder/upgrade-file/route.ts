@@ -1,59 +1,95 @@
 import { NextResponse } from "next/server";
-import { upgradeExistingFile } from "@/server/ai/builder-engine";
+import { runUpgradeEngine } from "@/server/ai/upgrade-engine";
 
 export const runtime = "edge";
 
 /**
- * DevVelocity — File Upgrade API
- * --------------------------------------------------
- * Accepts a pasted architecture file (JSON or plain text)
- * And upgrades it using GPT-5.1-Pro:
- *   - regenerates cloud-init
- *   - updates docker-compose
- *   - fixes outdated pipelines
- *   - applies new tier limits
- *   - suggests upgrades
- *   - auto-fixes syntax issues
- *   - modernizes infra best practices
+ * AI Builder — Upgrade an Existing Build File
+ * POST /api/ai-builder/upgrade-file
+ *
+ * Body:
+ * {
+ *   "plan": "startup",
+ *   "fileContent": "{... json ...}",
+ *   "metadata": {
+ *      "file_id": "...",
+ *      "org_id": "...",
+ *      "user_id": "..."
+ *   }
+ * }
  */
-
 export async function POST(req: Request) {
   try {
-    const { plan, fileContent } = await req.json();
-
-    if (!fileContent) {
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
       return NextResponse.json(
-        { error: "Missing fileContent" },
+        { error: "Invalid JSON body." },
         { status: 400 }
       );
     }
 
-    // Run AI engine
-    const upgraded = await upgradeExistingFile({
-      plan: plan ?? "developer",
-      fileContent,
-    });
+    const { plan, fileContent, metadata } = body;
 
-    if (upgraded?.error) {
+    if (!plan) {
       return NextResponse.json(
-        { error: upgraded.error },
+        { error: "Missing required field: plan" },
+        { status: 400 }
+      );
+    }
+
+    if (!fileContent) {
+      return NextResponse.json(
+        { error: "Missing required field: fileContent" },
+        { status: 400 }
+      );
+    }
+
+    if (!metadata || !metadata.file_id) {
+      return NextResponse.json(
+        { error: "Missing metadata.file_id" },
+        { status: 400 }
+      );
+    }
+
+    // 🔥 Run GPT-5.1-Pro Upgrade Engine
+    let upgraded;
+    try {
+      upgraded = await runUpgradeEngine({
+        plan,
+        fileContent,
+        metadata,
+      });
+    } catch (err: any) {
+      console.error("Upgrade Engine Error:", err);
+      return NextResponse.json(
+        { error: "File upgrade engine failed." },
         { status: 500 }
       );
     }
 
+    if (!upgraded) {
+      return NextResponse.json(
+        { error: "No upgrade result returned." },
+        { status: 500 }
+      );
+    }
+
+    // 🎯 Respond with upgraded file
     return NextResponse.json(
-      { upgraded },
+      {
+        upgradedFile: upgraded.file,
+        changes: upgraded.changes,
+        upgradeHints: upgraded.upgradeHints || [],
+        versionRecorded: upgraded.versionRecorded ?? false,
+      },
       { status: 200 }
     );
   } catch (err: any) {
-    console.error("Upgrade File Route Error:", err);
-
+    console.error("Unhandled Upgrade API Error:", err);
     return NextResponse.json(
-      {
-        error:
-          err?.message ??
-          "AI file upgrade failed. Please try again or contact support.",
-      },
+      { error: err?.message ?? "Unknown server error." },
       { status: 500 }
     );
   }
