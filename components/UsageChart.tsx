@@ -1,94 +1,77 @@
 "use client";
 
-import React from "react";
+interface UsageEntry {
+  date: string;
+  pipelines_run?: number;
+  provider_api_calls?: number;
+  build_minutes?: number;
+}
+
+interface Props {
+  data: UsageEntry[];
+  field: "pipelines_run" | "provider_api_calls" | "build_minutes";
+  label: string;
+}
 
 /**
- * Lightweight SVG line chart for usage metrics.
- * Works perfectly on Cloudflare Pages with zero dependencies.
+ * Pure SVG Line Chart — Cloudflare Pages Compatible
+ * No external libraries. Very lightweight.
  */
-
-export default function UsageChart({
-  data,
-  field,
-  label,
-}: {
-  data: any[];
-  field: string;
-  label: string;
-}) {
+export default function UsageChart({ data, field, label }: Props) {
   if (!data || data.length === 0) {
     return (
-      <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800 text-gray-400">
-        No usage data available.
+      <div className="p-6 bg-neutral-900 border border-neutral-800 rounded-xl text-gray-400">
+        No usage yet.
       </div>
     );
   }
 
-  // Extract numeric values
-  const values = data.map((d) => d[field] ?? 0);
-  const max = Math.max(...values, 10);
+  // Extract values
+  const values = data.map((d) => d[field] || 0);
+
+  const max = Math.max(...values);
   const min = 0;
 
-  // SVG chart dimensions
-  const width = 600;
-  const height = 160;
-  const padding = 20;
-
-  const step = (width - padding * 2) / (values.length - 1);
-
-  // Build line path
-  const points = values
-    .map((v, i) => {
-      const x = padding + i * step;
-      const y = height - padding - (v / max) * (height - padding * 2);
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * 300; // width
+    const y = 120 - (v / (max || 1)) * 100; // height
+    return `${x},${y}`;
+  });
 
   return (
-    <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800">
-      <h3 className="text-lg font-semibold mb-2">{label}</h3>
+    <div className="p-6 bg-neutral-900 border border-neutral-800 rounded-xl">
+      <h3 className="font-semibold mb-3">{label}</h3>
 
-      <svg width={width} height={height} className="overflow-visible">
-        {/* Background Line */}
+      <svg width="100%" height="150" viewBox="0 0 300 150" className="overflow-visible">
+
+        {/* Background grid lines */}
+        <line x1="0" y1="20" x2="300" y2="20" stroke="#333" strokeWidth="1" />
+        <line x1="0" y1="60" x2="300" y2="60" stroke="#333" strokeWidth="1" />
+        <line x1="0" y1="100" x2="300" y2="100" stroke="#333" strokeWidth="1" />
+
+        {/* Main Line */}
         <polyline
           fill="none"
-          stroke="#333"
-          strokeWidth="1"
-          points={`${padding},${height - padding} ${
-            width - padding
-          },${height - padding}`}
-        />
-
-        {/* Data Line */}
-        <polyline
-          fill="none"
-          stroke="#3b82f6"
+          stroke="#4dabf7"
           strokeWidth="3"
-          points={points}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          points={points.join(" ")}
         />
 
-        {/* Dots */}
-        {points.split(" ").map((p, i) => {
-          const [x, y] = p.split(",");
+        {/* Points */}
+        {points.map((p, i) => {
+          const [cx, cy] = p.split(",").map(Number);
           return (
-            <circle
-              key={i}
-              cx={x}
-              cy={y}
-              r={4}
-              fill="#3b82f6"
-              stroke="#1e40af"
-              strokeWidth={1}
-            />
+            <circle key={i} cx={cx} cy={cy} r="3" fill="#4dabf7" />
           );
         })}
       </svg>
 
-      {/* Min/Max Labels */}
-      <div className="flex justify-between text-gray-400 text-xs mt-2">
-        <span>0</span>
-        <span>{max}</span>
+      {/* Stats */}
+      <div className="flex justify-between text-xs text-gray-400 mt-3">
+        <span>Min: {min}</span>
+        <span>Max: {max}</span>
       </div>
     </div>
   );
