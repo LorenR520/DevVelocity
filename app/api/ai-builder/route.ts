@@ -1,80 +1,43 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
+import { generateArchitecture } from "@/server/ai/builder-engine";
 
-export const runtime = "edge"; // Cloudflare-compatible
+export const runtime = "edge";
+
+/**
+ * DevVelocity — AI Builder API
+ * -------------------------------------
+ * Receives the questionnaire answers from the UI,
+ * applies tier logic in the engine,
+ * and returns a full GPT-5.1-Pro architecture plan.
+ */
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const answers = body.answers;
+    const { answers } = await req.json();
 
     if (!answers) {
       return NextResponse.json(
-        { error: "Missing answers in request." },
+        { error: "Missing answers payload." },
         { status: 400 }
       );
     }
 
-    // ------------------------------
-    // 🧠 Build System Prompt
-    // ------------------------------
-    const systemPrompt = buildAIPrompt(answers);
+    // Run AI Builder Engine → GPT-5.1-Pro
+    const output = await generateArchitecture(answers);
 
-    // ------------------------------
-    // 🤖 Initialize OpenAI (GPT-5.1-Pro)
-    // ------------------------------
-    const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-5.1-pro", // 🔥 your chosen top-tier model
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: "Generate my full architecture output now.",
-        },
-      ],
-      max_tokens: 8000,
-      temperature: 0.25, // More deterministic, more reliable
-    });
-
-    const content = completion.choices?.[0]?.message?.content;
-
-    if (!content) {
+    if (output?.error) {
       return NextResponse.json(
-        { error: "Model returned empty output." },
+        { error: output.error },
         { status: 500 }
       );
     }
 
-    // GPT-5.1 returns *extremely well-formed* JSON 99% of the time.
-    let parsedOutput;
-    try {
-      parsedOutput = JSON.parse(content);
-    } catch {
-      // fallback: return raw text if JSON parse failed
-      parsedOutput = content;
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        output: parsedOutput,
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({ output }, { status: 200 });
   } catch (err: any) {
-    console.error("AI Builder Error:", err);
+    console.error("AI Builder Route Error:", err);
 
     return NextResponse.json(
-      {
-        error:
-          err?.message ||
-          "AI Builder failed — check your OpenAI API key and tier.",
-      },
+      { error: err?.message ?? "AI Builder failed" },
       { status: 500 }
     );
   }
