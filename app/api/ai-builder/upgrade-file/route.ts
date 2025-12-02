@@ -1,33 +1,33 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
+import { buildUpgradePrompt } from "@/ai-builder/upgrade-prompt";
 import { rateLimitCheck } from "@/server/rate-limit";
 
-// ------------------------------
+// ----------------------------------
 // 🔐 GPT-5.1-PRO Client
-// ------------------------------
+// ----------------------------------
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// ------------------------------
-// POST /api/ai-builder
-// ------------------------------
+// ----------------------------------
+// POST /api/ai-builder/upgrade-file
+// ----------------------------------
 export async function POST(req: Request) {
   try {
-    const { answers } = await req.json();
+    const { fileContent, plan } = await req.json();
 
-    if (!answers) {
+    if (!fileContent) {
       return NextResponse.json(
-        { error: "Missing questionnaire answers." },
+        { error: "Missing file content to upgrade." },
         { status: 400 }
       );
     }
 
-    // ------------------------------
+    // ----------------------------------
     // 🔐 Rate Limit
-    // ------------------------------
-    const rateExceeded = await rateLimitCheck("ai-builder");
+    // ----------------------------------
+    const rateExceeded = await rateLimitCheck("upgrade-file");
     if (rateExceeded) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Try again later." },
@@ -35,14 +35,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // ------------------------------
-    // 🧠 Build System Prompt
-    // ------------------------------
-    const systemPrompt = buildAIPrompt(answers);
+    // ----------------------------------
+    // 🧠 Build Upgrade Prompt
+    // ----------------------------------
+    const systemPrompt = buildUpgradePrompt(fileContent, plan);
 
-    // ------------------------------
+    // ----------------------------------
     // 🤖 GPT-5.1-PRO Call
-    // ------------------------------
+    // ----------------------------------
     const response = await client.chat.completions.create({
       model: "gpt-5.1-pro",
       messages: [
@@ -50,18 +50,19 @@ export async function POST(req: Request) {
         {
           role: "user",
           content:
-            "Generate my complete infrastructure architecture following the JSON format.",
+            "Analyze the pasted file and generate an updated version following modern DevOps architecture and JSON output format.",
         },
       ],
-      temperature: 0.2,
+      temperature: 0.25,
       max_tokens: 9000,
       response_format: { type: "json_object" },
     });
 
-    // ------------------------------
+    // ----------------------------------
     // Parse JSON Output
-    // ------------------------------
+    // ----------------------------------
     let output: any = null;
+
     try {
       output = JSON.parse(response.choices[0].message.content || "{}");
     } catch (err) {
@@ -71,14 +72,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // ------------------------------
-    // Success Response
-    // ------------------------------
+    // ----------------------------------
+    // Success
+    // ----------------------------------
     return NextResponse.json(
-      {
-        success: true,
-        output,
-      },
+      { success: true, output },
       { status: 200 }
     );
   } catch (err: any) {
