@@ -1,80 +1,85 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export async function GET() {
+/**
+ * LIST ALL FILES FOR USER'S ORG
+ *
+ * Returned:
+ * - id, filename, description
+ * - created_at, updated_at
+ * - version_count
+ * - last_modified_by
+ *
+ * Tier Restrictions:
+ * - Developer → returns empty list (no access to File Portal)
+ * - Startup / Team / Enterprise → full access
+ */
+
+export async function POST(req: Request) {
   try {
-    // ------------------------------------------------
-    // 🔐 1. Auth: Get logged-in user
-    // ------------------------------------------------
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_ANON_KEY!
-    );
+    const { orgId, plan } = await req.json();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // ------------------------------------------------
-    // 🧩 2. Plan Gating (Developer cannot access)
-    // ------------------------------------------------
-    const plan = user.app_metadata?.plan ?? "developer";
-    const allowedPlans = ["startup", "team", "enterprise"];
-
-    if (!allowedPlans.includes(plan)) {
+    if (!orgId) {
       return NextResponse.json(
-        {
-          error:
-            "File Portal is available only for Startup, Team, and Enterprise plans.",
-        },
-        { status: 403 }
+        { error: "Missing orgId" },
+        { status: 400 }
       );
     }
 
-    // ------------------------------------------------
-    // 📂 3. Fetch file metadata
-    // ------------------------------------------------
-    const { data: files, error } = await supabase
-      .from("user_files")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    // --------------------------------------------------
+    // 1. Developer tier has NO access to saved files
+    // --------------------------------------------------
+    if (plan === "developer") {
+      return NextResponse.json({
+        files: [],
+        message: "Upgrade required to access saved infrastructure files.",
+      });
+    }
 
-    if (error) {
-      console.error(error);
+    // --------------------------------------------------
+    // 2. Supabase client
+    // --------------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // --------------------------------------------------
+    // 3. Fetch files
+    // --------------------------------------------------
+    const { data: files, error: filesErr } = await supabase
+      .from("files")
+      .select(
+        `
+        id,
+        filename,
+        description,
+        created_at,
+        updated_at,
+        org_id,
+        deleted_at,
+        last_modified_by,
+        version_count: file_version_history(count)
+      `
+      )
+      .eq("org_id", orgId)
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: false });
+
+    if (filesErr) {
       return NextResponse.json(
-        { error: "Failed to fetch file listings" },
+        { error: "Failed to load files" },
         { status: 500 }
       );
     }
 
-    // ------------------------------------------------
-    // ⏳ 4. Add “outdated warning” logic
-    // ------------------------------------------------
-    const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
-
-    const results = files.map((file) => {
-      const age = Date.now() - new Date(file.created_at).getTime();
-
-      return {
-        ...file,
-        should_update: age > THIRTY_DAYS,
-        update_message:
-          age > THIRTY_DAYS
-            ? "This file may be outdated. Run it through the AI Builder to get an updated version."
-            : null,
-      };
+    return NextResponse.json({
+      files: files ?? [],
     });
-
-    return NextResponse.json({ files: results });
   } catch (err: any) {
-    console.error("List files error:", err);
+    console.error("File list error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Server error" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
