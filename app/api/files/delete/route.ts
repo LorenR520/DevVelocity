@@ -2,23 +2,39 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * DELETE A USER FILE
+ * DELETE a saved file (Soft Delete Only)
+ * ---------------------------------------------------
+ * Tier Rules:
+ *   - Developer → NO access (must upgrade)
+ *   - Startup / Team / Enterprise → full delete access
  *
- * Rules:
- * - Must belong to user's org
- * - Prevent deleting if plan is "developer" (optional rule: they can’t restore, but can delete — your choice)
- * - Soft delete instead of hard delete
- * - Log usage event (delete = 1 API call)
+ * Behavior:
+ *   - Marks deleted_at timestamp
+ *   - Keeps file_version_history intact
+ *   - Logs usage activity
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId, plan, orgId, userId } = await req.json();
+    const { fileId, orgId, plan, userId } = await req.json();
 
-    if (!fileId || !plan || !orgId || !userId) {
+    if (!fileId || !orgId) {
       return NextResponse.json(
-        { error: "Missing required parameters" },
+        { error: "Missing fileId or orgId" },
         { status: 400 }
+      );
+    }
+
+    // --------------------------------------------------
+    // Developer plan cannot delete files
+    // --------------------------------------------------
+    if (plan === "developer") {
+      return NextResponse.json(
+        {
+          error: "Upgrade required to delete saved files.",
+          upgrade_required: true,
+        },
+        { status: 401 }
       );
     }
 
@@ -28,54 +44,61 @@ export async function POST(req: Request) {
     );
 
     // --------------------------------------------------
-    // 1. Fetch file — ensure belongs to org
+    // Check file belongs to org
     // --------------------------------------------------
-    const { data: file, error: fileErr } = await supabase
+    const { data: file, error: loadErr } = await supabase
       .from("files")
-      .select("*")
+      .select("id, org_id")
       .eq("id", fileId)
-      .eq("org_id", orgId)
       .single();
 
-    if (fileErr || !file) {
+    if (loadErr || !file) {
       return NextResponse.json(
-        { error: "File not found or access denied" },
+        { error: "File not found" },
         { status: 404 }
       );
     }
 
+    if (file.org_id !== orgId) {
+      return NextResponse.json(
+        { error: "Unauthorized: file does not belong to this org" },
+        { status: 403 }
+      );
+    }
+
     // --------------------------------------------------
-    // 2. Soft-delete file
+    // Soft-delete file
     // --------------------------------------------------
     const { error: deleteErr } = await supabase
       .from("files")
       .update({
         deleted_at: new Date().toISOString(),
+        last_modified_by: userId ?? null,
       })
-      .eq("id", fileId)
-      .eq("org_id", orgId);
+      .eq("id", fileId);
 
     if (deleteErr) {
       return NextResponse.json(
-        { error: "Failed to delete the file" },
+        { error: "Failed to delete file" },
         { status: 500 }
       );
     }
 
     // --------------------------------------------------
-    // 3. Log usage
+    // Log usage activity
     // --------------------------------------------------
     await supabase.from("usage_logs").insert({
       org_id: orgId,
-      user_id: userId,
-      event_type: "file_delete",
-      provider_api_calls: 1,
-      created_at: new Date().toISOString(),
+      pipelines_run: 0,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
     });
 
     return NextResponse.json({
       success: true,
       message: "File deleted successfully",
+      fileId,
     });
   } catch (err: any) {
     console.error("Delete file error:", err);
