@@ -1,81 +1,72 @@
 // app/api/files/diff/route.ts
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { diffLines } from "diff";
+import { createTwoFilesPatch, diffLines } from "diff";
 
 /**
- * Diff Route
+ * DIFF VISUALIZER API
  * --------------------------------------------
  * Compares:
- *   - previous version content
- *   - new version content
+ *  - current file content
+ *  - previous file version OR user-supplied text
  *
- * Restrictions:
- *   - Developer plan: ❌ No access
- *   - Startup/Team/Enterprise: ✅ Full access
+ * Returns:
+ *  - added lines
+ *  - removed lines
+ *  - unchanged blocks
+ *  - full unified diff patch
+ *
+ * Used in: File Portal → “Compare Versions”
  */
 
 export async function POST(req: Request) {
   try {
-    const { orgId, plan, oldContent, newContent } = await req.json();
+    const { oldContent, newContent, filename } = await req.json();
 
-    if (!orgId || !oldContent || !newContent) {
+    if (!oldContent || !newContent) {
       return NextResponse.json(
-        { error: "Missing orgId, oldContent, or newContent" },
+        { error: "oldContent and newContent are required" },
         { status: 400 }
       );
     }
 
-    if (plan === "developer") {
-      return NextResponse.json(
-        {
-          error: "Diff Viewer is not available on the Developer plan. Upgrade required.",
-        },
-        { status: 403 }
-      );
-    }
+    // --------------------------------------------
+    // 1. Compute line-by-line diff
+    // --------------------------------------------
+    const diff = diffLines(oldContent, newContent);
 
-    // -----------------------------
-    // Generate Diff
-    // -----------------------------
-    const changes = diffLines(oldContent, newContent);
-
-    const formatted = changes.map((c) => ({
-      text: c.value,
-      added: !!c.added,
-      removed: !!c.removed,
-    }));
-
-    // -----------------------------
-    // Optional: Log diff usage
-    // -----------------------------
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    // --------------------------------------------
+    // 2. Create unified diff patch (Git-style)
+    // --------------------------------------------
+    const patch = createTwoFilesPatch(
+      filename ?? "previous",
+      filename ?? "updated",
+      oldContent,
+      newContent
     );
 
-    await supabase.from("usage_logs").insert({
-      org_id: orgId,
-      provider_api_calls: 0,
-      pipelines_run: 0,
-      build_minutes: 0,
-      ai_builds: 0,
-      ai_upgrades: 0,
-      diffs_viewed: 1,
-      date: new Date().toISOString(),
-    });
+    // --------------------------------------------
+    // 3. Transform to frontend-friendly structure
+    // --------------------------------------------
+    const blocks = diff.map((part) => ({
+      type: part.added
+        ? "added"
+        : part.removed
+        ? "removed"
+        : "unchanged",
+      value: part.value,
+      count: part.count,
+    }));
 
     return NextResponse.json({
       success: true,
-      diff: formatted,
+      patch,
+      blocks,
     });
   } catch (err: any) {
     console.error("Diff route error:", err);
     return NextResponse.json(
-      {
-        error: err.message || "Internal server error",
-      },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
