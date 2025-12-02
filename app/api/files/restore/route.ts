@@ -2,48 +2,68 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * RESTORE FILE VERSION
+ * RESTORE A PREVIOUS VERSION OF A FILE
+ * --------------------------------------
+ * For Startup, Team, Enterprise tiers.
  *
- * Rules:
- * - Developer tier cannot restore older versions.
- * - Must check org ownership.
- * - Creates a new version entry after restoring.
- * - Writes usage_logs entry for billing/usage tracking.
- * - Returns the restored content for UI update.
+ * Steps:
+ * 1. Validate fileId, versionId, orgId, plan
+ * 2. Ensure plan !== developer
+ * 3. Load file + version ensuring they're part of the same org
+ * 4. Update the current file content to the previous version
+ * 5. Insert new version history entry
+ * 6. Meter usage (restore counts as 1 pipeline)
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId, versionId, plan, orgId, userId } = await req.json();
+    const { fileId, versionId, orgId, plan } = await req.json();
 
-    if (!fileId || !versionId || !plan || !orgId || !userId) {
+    if (!fileId || !versionId || !orgId) {
       return NextResponse.json(
-        { error: "Missing required parameters" },
+        { error: "Missing fileId, versionId, or orgId" },
         { status: 400 }
       );
     }
 
-    // 🔒 Developer tier cannot restore files
+    // ---------------------------------------------------
+    // Developer tier has NO access to restore
+    // ---------------------------------------------------
     if (plan === "developer") {
       return NextResponse.json(
-        {
-          error: "Your plan does not include restoring previous versions.",
-          upgrade: true,
-          upgradeMessage:
-            "Upgrade to Startup or higher to enable version restore.",
-        },
+        { error: "Upgrade required to restore previous versions." },
         { status: 403 }
       );
     }
 
+    // ---------------------------------------------------
+    // Supabase client (Admin)
+    // ---------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // --------------------------------------------------
-    // 1. Load the version to restore
-    // --------------------------------------------------
+    // ---------------------------------------------------
+    // Fetch target file
+    // ---------------------------------------------------
+    const { data: file, error: fileErr } = await supabase
+      .from("files")
+      .select("*")
+      .eq("id", fileId)
+      .eq("org_id", orgId)
+      .single();
+
+    if (fileErr || !file) {
+      return NextResponse.json(
+        { error: "File not found or belongs to another org" },
+        { status: 404 }
+      );
+    }
+
+    // ---------------------------------------------------
+    // Fetch the version being restored
+    // ---------------------------------------------------
     const { data: version, error: versionErr } = await supabase
       .from("file_version_history")
       .select("*")
@@ -53,66 +73,55 @@ export async function POST(req: Request) {
 
     if (versionErr || !version) {
       return NextResponse.json(
-        { error: "Version not found or access denied" },
+        { error: "Version not found or belongs to another org" },
         { status: 404 }
       );
     }
 
-    // --------------------------------------------------
-    // 2. Update the main file with restored content
-    // --------------------------------------------------
-    const { error: updateErr } = await supabase
+    const restoredContent = version.previous_content;
+
+    // ---------------------------------------------------
+    // Insert a NEW version entry documenting the restore
+    // ---------------------------------------------------
+    await supabase.from("file_version_history").insert({
+      file_id: fileId,
+      org_id: orgId,
+      previous_content: file.content, // what existed before restore
+      new_content: restoredContent, // what we restored to
+      change_summary: `Restored version from ${version.created_at}`,
+      last_modified_by: "system-restore",
+    });
+
+    // ---------------------------------------------------
+    // Update main file content
+    // ---------------------------------------------------
+    await supabase
       .from("files")
       .update({
-        content: version.content,
+        content: restoredContent,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", fileId)
-      .eq("org_id", orgId);
+      .eq("id", fileId);
 
-    if (updateErr) {
-      return NextResponse.json(
-        { error: "Failed to restore file" },
-        { status: 500 }
-      );
-    }
-
-    // --------------------------------------------------
-    // 3. Create a new version entry (post-restore snapshot)
-    // --------------------------------------------------
-    await supabase.from("file_version_history").insert({
-      org_id: orgId,
-      file_id: fileId,
-      content: version.content,
-      restored_from: versionId,
-      created_at: new Date().toISOString(),
-    });
-
-    // --------------------------------------------------
-    // 4. Log usage (RESTORE = billable event)
-    // --------------------------------------------------
+    // ---------------------------------------------------
+    // Meter usage: restoring = 1 pipeline action
+    // ---------------------------------------------------
     await supabase.from("usage_logs").insert({
       org_id: orgId,
-      user_id: userId,
-      event_type: "file_restore",
+      pipelines_run: 1,
+      provider_api_calls: 0,
       build_minutes: 0,
-      pipelines_run: 0,
-      provider_api_calls: 1, // counts toward API usage
-      created_at: new Date().toISOString(),
+      date: new Date().toISOString(),
     });
 
-    // --------------------------------------------------
-    // 5. Return restored content back to UI
-    // --------------------------------------------------
     return NextResponse.json({
       success: true,
-      restoredContent: version.content,
-      versionId,
+      message: "Version restored successfully",
     });
   } catch (err: any) {
-    console.error("Restore error:", err);
+    console.error("Restore route error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
