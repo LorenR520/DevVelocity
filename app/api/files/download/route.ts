@@ -1,41 +1,45 @@
-// app/api/files/download/route.ts
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * File Download API
- * -------------------------------
- * Returns a file the user saved in the portal.
+ * DOWNLOAD FILE API
  *
  * Rules:
- *  - Developer tier cannot download/sync files (upgrade required)
- *  - Must belong to same org_id
- *  - Returns as downloadable JSON file
+ *  - Developer tier cannot download (upgrade prompt)
+ *  - Must verify org ownership
+ *  - Returns the file content as a downloadable attachment
+ *  - Safe for Cloudflare Pages runtime
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId } = await req.json();
+    const { fileId, plan } = await req.json();
 
-    if (!fileId) {
+    if (!fileId || !plan) {
       return NextResponse.json(
-        { error: "Missing fileId" },
+        { error: "Missing fileId or plan" },
         { status: 400 }
       );
     }
 
-    // ---------------------------
-    // Supabase Admin
-    // ---------------------------
+    // 🔒 Developer plan not allowed to download files
+    if (plan === "developer") {
+      return NextResponse.json(
+        {
+          error: "Your plan does not include downloading saved builds.",
+          upgrade: true,
+          upgradeMessage: "Upgrade to Startup to unlock downloading your generated files."
+        },
+        { status: 403 }
+      );
+    }
+
     const supabase = createClient(
-      process.env.SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ---------------------------
-    // Get file with org_id + content
-    // ---------------------------
+    // Load file from database
     const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
@@ -49,68 +53,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---------------------------
-    // Fetch org to read plan
-    // ---------------------------
-    const { data: org, error: orgErr } = await supabase
-      .from("organizations")
-      .select("plan_id")
-      .eq("id", file.org_id)
-      .single();
+    const fileContent = file.content;
+    const filename = file.filename ?? "devvelocity-build.txt";
 
-    if (orgErr || !org) {
-      return NextResponse.json(
-        { error: "Organization not found" },
-        { status: 404 }
-      );
-    }
-
-    const plan = org.plan_id ?? "developer";
-
-    // ---------------------------
-    // Restrict Developer tier
-    // ---------------------------
-    if (plan === "developer") {
-      return NextResponse.json(
-        {
-          error:
-            "File downloads are not available on the Developer plan. Upgrade required.",
-        },
-        { status: 403 }
-      );
-    }
-
-    // ---------------------------
-    // Prepare content for download
-    // ---------------------------
-    const jsonString = JSON.stringify(file.content, null, 2);
-
-    const headers = new Headers();
-    headers.set("Content-Type", "application/json");
-    headers.set(
-      "Content-Disposition",
-      `attachment; filename="${file.name || "devvelocity_build"}.json"`
-    );
-
-    // ---------------------------
-    // Meter usage: 1 API call
-    // ---------------------------
-    await supabase.from("usage_logs").insert({
-      org_id: file.org_id,
-      provider_api_calls: 1,
-      pipelines_run: 0,
-      build_minutes: 0,
-      date: new Date().toISOString(),
-    });
-
-    return new Response(jsonString, {
+    // -----------------------------
+    // Serve the file for download
+    // -----------------------------
+    return new Response(fileContent, {
       status: 200,
-      headers,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
     });
   } catch (err: any) {
-    console.error("Download route error:", err);
+    console.error("Download error:", err);
     return NextResponse.json(
-      { error: err.message || "Internal error" },
+      { error: err.message ?? "Internal download error" },
       { status: 500 }
     );
   }
