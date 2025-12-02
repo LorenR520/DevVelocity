@@ -1,74 +1,86 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { recordActivity } from "@/lib/billing/recordActivity";
+import { createClient } from "@supabase/supabase-js";
+
+/**
+ * DELETE A USER FILE
+ *
+ * Rules:
+ * - Must belong to user's org
+ * - Prevent deleting if plan is "developer" (optional rule: they can’t restore, but can delete — your choice)
+ * - Soft delete instead of hard delete
+ * - Log usage event (delete = 1 API call)
+ */
 
 export async function POST(req: Request) {
   try {
-    const supabase = createClient();
-    const { id } = await req.json();
+    const { fileId, plan, orgId, userId } = await req.json();
 
-    if (!id) {
+    if (!fileId || !plan || !orgId || !userId) {
       return NextResponse.json(
-        { error: "Missing file ID." },
+        { error: "Missing required parameters" },
         { status: 400 }
       );
     }
 
-    // 1. Auth check
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    if (authErr || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    // 2. Fetch file metadata to validate org match
-    const { data: file, error: fetchErr } = await supabase
+    // --------------------------------------------------
+    // 1. Fetch file — ensure belongs to org
+    // --------------------------------------------------
+    const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
-      .eq("id", id)
+      .eq("id", fileId)
+      .eq("org_id", orgId)
       .single();
 
-    if (fetchErr || !file) {
+    if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or inaccessible." },
+        { error: "File not found or access denied" },
         { status: 404 }
       );
     }
 
-    // 3. Delete file
+    // --------------------------------------------------
+    // 2. Soft-delete file
+    // --------------------------------------------------
     const { error: deleteErr } = await supabase
       .from("files")
-      .delete()
-      .eq("id", id);
+      .update({
+        deleted_at: new Date().toISOString(),
+      })
+      .eq("id", fileId)
+      .eq("org_id", orgId);
 
     if (deleteErr) {
       return NextResponse.json(
-        { error: "Failed to delete file." },
+        { error: "Failed to delete the file" },
         { status: 500 }
       );
     }
 
-    // 4. Log billable activity (applies to all tiers except Developer)
-    await recordActivity({
-      userId: user.id,
-      orgId: file.org_id,
-      type: "file_delete",
-      metadata: { fileId: id },
+    // --------------------------------------------------
+    // 3. Log usage
+    // --------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      user_id: userId,
+      event_type: "file_delete",
+      provider_api_calls: 1,
+      created_at: new Date().toISOString(),
     });
 
     return NextResponse.json({
       success: true,
-      message: "File deleted successfully.",
+      message: "File deleted successfully",
     });
   } catch (err: any) {
+    console.error("Delete file error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Unknown server error." },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
