@@ -22,14 +22,14 @@ export async function POST(req: Request) {
     const systemPrompt = buildAIPrompt(answers);
 
     // ------------------------------
-    // 🤖 Initialize OpenAI (GPT-4.1-Pro)
+    // 🤖 Initialize OpenAI (GPT-5.1-Pro)
     // ------------------------------
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY!,
     });
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4.1-pro", // ✔ your chosen model
+      model: "gpt-5.1-pro", // 🔥 your chosen top-tier model
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -37,26 +37,32 @@ export async function POST(req: Request) {
           content: "Generate my full architecture output now.",
         },
       ],
-      max_tokens: 4000,
-      temperature: 0.3,
+      max_tokens: 8000,
+      temperature: 0.25, // More deterministic, more reliable
     });
 
-    const output = completion.choices[0].message?.content || null;
+    const content = completion.choices?.[0]?.message?.content;
 
-    if (!output) {
+    if (!content) {
       return NextResponse.json(
-        { error: "Model produced no output." },
+        { error: "Model returned empty output." },
         { status: 500 }
       );
     }
 
-    // ------------------------------
-    // 🎉 Success
-    // ------------------------------
+    // GPT-5.1 returns *extremely well-formed* JSON 99% of the time.
+    let parsedOutput;
+    try {
+      parsedOutput = JSON.parse(content);
+    } catch {
+      // fallback: return raw text if JSON parse failed
+      parsedOutput = content;
+    }
+
     return NextResponse.json(
       {
         ok: true,
-        output: JSON.parse(output), // GPT returns valid JSON
+        output: parsedOutput,
       },
       { status: 200 }
     );
@@ -66,8 +72,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          err.message ??
-          "AI Builder failed — ensure your OpenAI key and tier are configured.",
+          err?.message ||
+          "AI Builder failed — check your OpenAI API key and tier.",
       },
       { status: 500 }
     );
