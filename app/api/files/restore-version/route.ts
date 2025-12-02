@@ -1,68 +1,133 @@
 import { NextResponse } from "next/server";
-import { createClient as createRouteClient } from "@/utils/supabase/route";
-import { restoreFileVersion } from "@/lib/files/restore";
-import { getPlan } from "@/ai-builder/plan-logic";
+import { createClient } from "@supabase/supabase-js";
 
 /**
- * RESTORE FILE VERSION API
- * POST /api/files/restore-version
+ * RESTORE A PREVIOUS FILE VERSION
+ * ---------------------------------------------------
+ * Tier Access:
+ *  - Developer → No access
+ *  - Startup / Team / Enterprise → allowed
  *
- * Body:
- * {
- *   "versionId": "uuid-of-version"
- * }
- *
- * Security:
- * - Must be logged in
- * - Must belong to the same org as the file
- * - Developer tier blocked from version restore feature
+ * Steps:
+ *  1. Validate request
+ *  2. Verify file + version belong to org
+ *  3. Replace current file content
+ *  4. Log restore into file_version_history
+ *  5. Meter usage
  */
 
 export async function POST(req: Request) {
   try {
-    const supabase = createRouteClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const { fileId, versionId, orgId, plan } = await req.json();
 
-    if (!session || !session.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!fileId || !versionId || !orgId) {
+      return NextResponse.json(
+        { error: "Missing fileId, versionId, or orgId" },
+        { status: 400 }
+      );
     }
 
-    const user = session.user;
-    const body = await req.json();
-    const { versionId } = body;
-
-    if (!versionId) {
-      return NextResponse.json({ error: "versionId is required" }, { status: 400 });
+    // --------------------------------------------------
+    // Developer tier cannot restore versions
+    // --------------------------------------------------
+    if (plan === "developer") {
+      return NextResponse.json(
+        {
+          error: "Upgrade required to restore file versions.",
+          upgrade_required: true,
+        },
+        { status: 401 }
+      );
     }
 
-    // 🧩 Fetch the user's plan
-    const planId = session.user?.app_metadata?.plan ?? "developer";
-    const plan = getPlan(planId);
+    // --------------------------------------------------
+    // Supabase
+    // --------------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    // 🧩 Block Developer plan
-    if (!plan || plan.id === "developer") {
-      return NextResponse.json({
-        error: "File version restore is not available on the Developer plan. Upgrade required.",
-      }, { status: 403 });
+    // --------------------------------------------------
+    // Validate file exists + belongs to org
+    // --------------------------------------------------
+    const { data: file, error: fileErr } = await supabase
+      .from("files")
+      .select("id, org_id, content, filename")
+      .eq("id", fileId)
+      .single();
+
+    if (fileErr || !file) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    // 🧩 Add org_id to request context
-    const augmentedUser = {
-      ...user,
-      org_id: session.user?.app_metadata?.org_id,
-    };
-
-    // 🧠 Execute restore process
-    const result = await restoreFileVersion(versionId, augmentedUser);
-
-    if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+    if (file.org_id !== orgId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
-    return NextResponse.json({ success: true });
+    // --------------------------------------------------
+    // Fetch version to restore
+    // --------------------------------------------------
+    const { data: version, error: versionErr } = await supabase
+      .from("file_version_history")
+      .select("id, new_content, created_at, change_summary")
+      .eq("id", versionId)
+      .eq("org_id", orgId)
+      .eq("file_id", fileId)
+      .single();
+
+    if (versionErr || !version) {
+      return NextResponse.json(
+        { error: "Version not found" },
+        { status: 404 }
+      );
+    }
+
+    const restoredContent = version.new_content;
+
+    // --------------------------------------------------
+    // Update the current file with restored content
+    // --------------------------------------------------
+    await supabase
+      .from("files")
+      .update({
+        content: restoredContent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", fileId);
+
+    // --------------------------------------------------
+    // Log restore as a new version record
+    // --------------------------------------------------
+    await supabase.from("file_version_history").insert({
+      file_id: fileId,
+      org_id: orgId,
+      previous_content: file.content,
+      new_content: restoredContent,
+      change_summary: `Restored to version ${versionId} from ${version.created_at}`,
+    });
+
+    // --------------------------------------------------
+    // Meter Usage (Restore = 1 pipeline usage)
+    // --------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      pipelines_run: 1,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
+    });
+
+    return NextResponse.json({
+      restored: true,
+      message: `Restored to version ${versionId}`,
+      filename: file.filename,
+      content: restoredContent,
+    });
   } catch (err: any) {
+    console.error("Restore-version API error:", err);
     return NextResponse.json(
-      { error: err.message || "Failed to restore file version" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
