@@ -4,15 +4,15 @@ import OpenAI from "openai";
 import { buildAIPrompt } from "@/ai-builder/prompt";
 
 /**
- * DevVelocity AI Builder Engine
- * ------------------------------
- * Uses GPT-5.1-Pro to generate:
- *  - Cloud architecture
+ * DevVelocity AI Builder Engine (GPT-5.1-Pro)
+ * ------------------------------------------
+ * Generates:
+ *  - Architecture
  *  - Cloud-init
  *  - Docker Compose
  *  - Pipelines
- *  - Security + SSO models
- *  - Budget analysis
+ *  - SSO/Security models
+ *  - Budget projections
  *  - Upgrade recommendations
  */
 
@@ -21,50 +21,38 @@ export async function runAIBuild(answers: Record<string, any>) {
     throw new Error("Missing OPENAI_API_KEY");
   }
 
-  // ------------------------------------------
-  // Initialize GPT-5.1-Pro Client
-  // ------------------------------------------
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY!,
   });
 
-  // Produce the master prompt
-  const prompt = buildAIPrompt(answers);
+  const systemPrompt = buildAIPrompt(answers);
 
   // ------------------------------------------
-  // Call GPT-5.1-Pro
+  // GPT-5.1-Pro Call (new API)
   // ------------------------------------------
-  const completion = await openai.chat.completions.create({
+  const response = await client.responses.create({
     model: "gpt-5.1-pro",
-    temperature: 0.2,
-    max_tokens: 6000,
+    temperature: 0.25,
+    max_output_tokens: 6000,
+    response_format: { type: "json_object" },
     messages: [
-      {
-        role: "system",
-        content: prompt,
-      },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content:
-          "Generate the complete infrastructure output in the required JSON structure.",
+          "Generate the complete infrastructure output in the required JSON schema.",
       },
     ],
   });
 
-  const raw = completion.choices?.[0]?.message?.content;
+  const raw = response.output_text;
+  if (!raw) throw new Error("AI returned empty output.");
 
-  if (!raw) {
-    throw new Error("AI returned no data.");
-  }
-
-  // ------------------------------------------
-  // Attempt to parse JSON output
-  // ------------------------------------------
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.error("JSON parsing failed:", err);
+    console.error("Invalid JSON from AI:", raw);
     throw new Error("AI output was not valid JSON.");
   }
 
@@ -72,72 +60,72 @@ export async function runAIBuild(answers: Record<string, any>) {
 }
 
 /**
- * Upgrade Engine — re-evaluates an existing saved infrastructure file
- * and makes updated recommendations based on:
- *  - new cloud best practices
- *  - updated security rules
- *  - user's current plan tier
- *  - optimization opportunities
+ * Upgrade Engine — GPT-5.1-Pro
+ * ------------------------------------------
+ * Takes an OLD config file and:
+ *  - updates to new cloud best practices
+ *  - enforces tier limits
+ *  - modernizes templates
+ *  - warns about deprecated features
+ *  - suggests upgrades ONLY if needed
  */
 export async function runAIUpgrade(existingConfig: string, plan: string) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Missing OPENAI_API_KEY");
   }
 
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY!,
   });
 
-  const prompt = `
-You are DevVelocity AI Upgrade Engine.
-The user has provided an **existing infrastructure file** that may be outdated.
+  const upgradePrompt = `
+You are the DevVelocity **AI Upgrade Engine** (GPT-5.1-Pro).
 
-Your job:
-  - Analyze it
-  - Modernize it
-  - Enforce tier restrictions
-  - Suggest optimizations
-  - Identify deprecated features
-  - Recommend an upgrade ONLY if needed
-  - Maintain full JSON structure
+Your task:
+  - Analyze the existing infrastructure config
+  - Modernize it using 2025 best practices
+  - Enforce the user's plan tier: ${plan}
+  - Fix deprecated keys
+  - Optimize cloud-init
+  - Upgrade containerization & pipelines
+  - Suggest improvements ONLY when needed
+  - Keep JSON structure fully valid
 
-User Plan: ${plan}
-
-Return JSON EXACTLY in this structure:
+Return JSON EXACTLY as:
 
 {
-  "updated_config": { ...updated JSON... },
-  "changes": "... list of what changed ...",
-  "upgrade_suggestions": "... if any ...",
-  "warnings": "... if any ..."
+  "updated_config": { ... },
+  "changes": "bullet list of improvements",
+  "upgrade_suggestions": "if plan upgrade is recommended",
+  "warnings": "if any deprecated or risky patterns found"
 }
 
-Here is the user's existing config:
+Here is the old config:
 \`\`\`json
 ${existingConfig}
 \`\`\`
 `;
 
-  const completion = await openai.chat.completions.create({
+  const response = await client.responses.create({
     model: "gpt-5.1-pro",
     temperature: 0.2,
-    max_tokens: 5000,
+    max_output_tokens: 5000,
+    response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: prompt },
+      { role: "system", content: upgradePrompt },
       { role: "user", content: "Analyze and upgrade this config now." },
     ],
   });
 
-  const raw = completion.choices?.[0]?.message?.content;
-  if (!raw) {
-    throw new Error("Upgrade engine returned no data.");
-  }
+  const raw = response.output_text;
+  if (!raw) throw new Error("AI returned no output.");
 
   let parsed;
+
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.error("JSON parse error:", raw);
+    console.error("Upgrade JSON parsing failed:", raw);
     throw new Error("Upgrade output was invalid JSON.");
   }
 
