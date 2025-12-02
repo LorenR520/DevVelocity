@@ -1,86 +1,45 @@
+// app/api/files/download/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * DOWNLOAD ENDPOINT
- * 
- * Supports:
- *  - Secure download (RLS + token validation)
- *  - Version-aware retrieval
- *  - Usage tracking for metered billing
- *  - Plan restrictions (Developer tier blocked)
+ * File Download API
+ * -------------------------------
+ * Returns a file the user saved in the portal.
+ *
+ * Rules:
+ *  - Developer tier cannot download/sync files (upgrade required)
+ *  - Must belong to same org_id
+ *  - Returns as downloadable JSON file
  */
 
 export async function POST(req: Request) {
   try {
-    const { file_id, version } = await req.json();
+    const { fileId } = await req.json();
 
-    if (!file_id) {
+    if (!fileId) {
       return NextResponse.json(
-        { error: "Missing file_id" },
+        { error: "Missing fileId" },
         { status: 400 }
       );
     }
 
-    // ------------------------------------------
-    // Init Supabase Admin (service key required)
-    // ------------------------------------------
+    // ---------------------------
+    // Supabase Admin
+    // ---------------------------
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ------------------------------------------
-    // Validate Authorization Header
-    // ------------------------------------------
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "Missing token" }, { status: 401 });
-    }
-
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser(token);
-
-    if (!user || userErr) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
-
-    const orgId = user.app_metadata?.org_id;
-    const plan = user.app_metadata?.plan || "developer";
-
-    if (!orgId) {
-      return NextResponse.json(
-        { error: "No org_id found" },
-        { status: 403 }
-      );
-    }
-
-    // ------------------------------------------
-    // Plan Restriction — no File Portal for Developer
-    // ------------------------------------------
-    if (plan === "developer") {
-      return NextResponse.json(
-        {
-          error:
-            "File Portal is not available on the Developer plan. Upgrade to Startup or higher.",
-        },
-        { status: 403 }
-      );
-    }
-
-    // ------------------------------------------
-    // Load the file metadata
-    // ------------------------------------------
+    // ---------------------------
+    // Get file with org_id + content
+    // ---------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
-      .eq("id", file_id)
-      .eq("org_id", orgId)
+      .eq("id", fileId)
       .single();
 
     if (fileErr || !file) {
@@ -90,54 +49,68 @@ export async function POST(req: Request) {
       );
     }
 
-    // ------------------------------------------
-    // If version specified → retrieve from history
-    // ------------------------------------------
-    let contentToReturn = file.content;
+    // ---------------------------
+    // Fetch org to read plan
+    // ---------------------------
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("plan_id")
+      .eq("id", file.org_id)
+      .single();
 
-    if (version && version !== file.latest_version) {
-      const { data: versionRow, error: versionErr } = await supabase
-        .from("file_version_history")
-        .select("content")
-        .eq("file_id", file_id)
-        .eq("version", version)
-        .eq("org_id", orgId)
-        .single();
-
-      if (versionErr || !versionRow) {
-        return NextResponse.json(
-          { error: "Requested version not found" },
-          { status: 404 }
-        );
-      }
-
-      contentToReturn = versionRow.content;
+    if (orgErr || !org) {
+      return NextResponse.json(
+        { error: "Organization not found" },
+        { status: 404 }
+      );
     }
 
-    // ------------------------------------------
-    // Log usage for download (1 API call)
-    // ------------------------------------------
+    const plan = org.plan_id ?? "developer";
+
+    // ---------------------------
+    // Restrict Developer tier
+    // ---------------------------
+    if (plan === "developer") {
+      return NextResponse.json(
+        {
+          error:
+            "File downloads are not available on the Developer plan. Upgrade required.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // ---------------------------
+    // Prepare content for download
+    // ---------------------------
+    const jsonString = JSON.stringify(file.content, null, 2);
+
+    const headers = new Headers();
+    headers.set("Content-Type", "application/json");
+    headers.set(
+      "Content-Disposition",
+      `attachment; filename="${file.name || "devvelocity_build"}.json"`
+    );
+
+    // ---------------------------
+    // Meter usage: 1 API call
+    // ---------------------------
     await supabase.from("usage_logs").insert({
-      org_id: orgId,
-      date: new Date().toISOString().slice(0, 10),
-      build_minutes: 0,
-      pipelines_run: 0,
+      org_id: file.org_id,
       provider_api_calls: 1,
+      pipelines_run: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
     });
 
-    // ------------------------------------------
-    // Return file to user
-    // ------------------------------------------
-    return NextResponse.json({
-      success: true,
-      file_id,
-      version: version ?? file.latest_version,
-      content: contentToReturn,
+    return new Response(jsonString, {
+      status: 200,
+      headers,
     });
   } catch (err: any) {
-    console.error("File download error:", err);
+    console.error("Download route error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: err.message || "Internal error" },
       { status: 500 }
     );
   }
