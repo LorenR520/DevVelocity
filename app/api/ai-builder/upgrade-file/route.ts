@@ -1,96 +1,121 @@
 import { NextResponse } from "next/server";
-import { buildUpgradePrompt } from "@/ai-builder/upgrade-prompt";
 import OpenAI from "openai";
-import { createClient } from "@supabase/supabase-js";
+import { buildAIPrompt } from "@/ai-builder/prompt";
+
+export const runtime = "edge"; // Cloudflare Pages compatible
 
 /**
- * POST /api/ai-builder/upgrade-file
- * Upgrades an old JSON file using AI + enforces tier/plan limits.
+ * This endpoint upgrades older architecture files, scripts, or templates.
+ * It uses:
+ *  - GPT-5.1-Pro (top tier)
+ *  - Full plan constraints
+ *  - Current AI builder logic
+ *  - Automatic modernization + corrections
  */
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { oldContent, plan = "developer", fileId } = body;
+    const { fileContent, plan } = await req.json();
 
-    if (!oldContent) {
+    if (!fileContent) {
       return NextResponse.json(
-        { error: "Missing oldContent." },
+        { error: "Missing fileContent in request." },
         { status: 400 }
       );
     }
 
-    // -----------------------------------------
-    // 🔐 Initialize Supabase Admin
-    // -----------------------------------------
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // ------------------------------
+    // 🧠 Build system prompt for upgrade
+    // ------------------------------
+    const systemPrompt = `
+You are DevVelocity AI — GPT-5.1-Pro.
 
-    // -----------------------------------------
-    // 🧠 Build the SYSTEM PROMPT
-    // -----------------------------------------
-    const systemPrompt = buildUpgradePrompt(oldContent, plan);
+Your job is to UPGRADE an old architecture file by:
 
-    // -----------------------------------------
-    // 🤖 Initialize OpenAI GPT-4.1-Pro
-    // -----------------------------------------
-    const openai = new OpenAI({
+1. Updating it to **modern DevOps best practices**
+2. Enforcing **plan tier constraints**
+3. Checking for **deprecated features**
+4. Suggesting **optional upgrades**
+5. Improving:
+   - cloud-init
+   - docker-compose
+   - pipelines
+   - networking
+   - automation
+   - security
+   - scaling
+6. Keeping the customer's INFRA VALID and runnable
+
+Rewrite the architecture fully and output **clean JSON**:
+
+{
+  "summary": "...",
+  "architecture": "...",
+  "cloud_init": "...",
+  "docker_compose": "...",
+  "pipelines": { ... },
+  "networking": "...",
+  "maintenance_plan": "...",
+  "security_model": "...",
+  "upgrade_recommendations": "...",
+  "next_steps": "..."
+}
+
+Respond with complete JSON. Never output explanations.
+Plan Tier: ${plan ?? "developer"}
+`;
+
+    // ------------------------------
+    // 🤖 GPT-5.1-Pro call
+    // ------------------------------
+    const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY!,
     });
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-pro",  
+    const completion = await client.chat.completions.create({
+      model: "gpt-5.1-pro",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: oldContent },
+        {
+          role: "user",
+          content: `Here is the outdated file. Please modernize and upgrade it:\n\n${fileContent}`,
+        },
       ],
-      temperature: 0.2,
+      max_tokens: 8000,
+      temperature: 0.25,
     });
 
-    const upgraded = completion.choices?.[0]?.message?.content;
+    const content = completion.choices?.[0]?.message?.content;
 
-    if (!upgraded) {
+    if (!content) {
       return NextResponse.json(
-        { error: "AI did not return an upgraded file." },
+        { error: "Model returned empty output." },
         { status: 500 }
       );
     }
 
-    // -----------------------------------------
-    // 🗂 Save as a NEW VERSION (version history)
-    // -----------------------------------------
-    if (fileId) {
-      await supabase
-        .from("file_version_history")
-        .insert({
-          file_id: fileId,
-          org_id: null, // filled automatically via RLS if you enabled it
-          old_content: oldContent,
-          new_content: upgraded,
-        });
+    let parsedOutput;
+    try {
+      parsedOutput = JSON.parse(content);
+    } catch {
+      parsedOutput = content; // fallback as raw text
     }
 
-    // -----------------------------------------
-    // 🧾 Metering charge: AI Upgrade Action
-    // Adds cost to billing_events table
-    // -----------------------------------------
-    await supabase.from("billing_events").insert({
-      org_id: null, // RLS fills it in 
-      type: "ai_file_upgrade",
-      amount: 0.005, // 0.5¢ per upgrade (you can change)
-      details: { fileId },
-    });
-
-    return NextResponse.json({
-      upgraded,
-      message: "Upgrade successful",
-    });
-
-  } catch (err: any) {
-    console.error("Upgrade error:", err);
     return NextResponse.json(
-      { error: err.message || "Upgrade failed" },
+      {
+        ok: true,
+        output: parsedOutput,
+      },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    console.error("Upgrade-file error:", err);
+    return NextResponse.json(
+      {
+        error:
+          err?.message ??
+          "Upgrade-file endpoint failed. Check your API key and JSON formatting.",
+      },
       { status: 500 }
     );
   }
