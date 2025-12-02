@@ -1,43 +1,62 @@
 import { NextResponse } from "next/server";
-import { generateArchitecture } from "@/server/ai/builder-engine";
+import { runAIBuild } from "@/server/ai/builder-engine";
 
 export const runtime = "edge";
 
 /**
- * DevVelocity — AI Builder API
- * -------------------------------------
- * Receives the questionnaire answers from the UI,
- * applies tier logic in the engine,
- * and returns a full GPT-5.1-Pro architecture plan.
+ * AI Builder — Generate New Infrastructure Plan
+ * POST /api/ai-builder
  */
-
 export async function POST(req: Request) {
   try {
-    const { answers } = await req.json();
-
-    if (!answers) {
+    // Validate incoming JSON
+    let body: any = null;
+    try {
+      body = await req.json();
+    } catch (err) {
       return NextResponse.json(
-        { error: "Missing answers payload." },
+        { error: "Invalid JSON body." },
         { status: 400 }
       );
     }
 
-    // Run AI Builder Engine → GPT-5.1-Pro
-    const output = await generateArchitecture(answers);
-
-    if (output?.error) {
+    // Ensure answers exist
+    if (!body || typeof body !== "object" || !body.answers) {
       return NextResponse.json(
-        { error: output.error },
+        { error: "Missing required field: 'answers'." },
+        { status: 400 }
+      );
+    }
+
+    // Run AI Builder output using GPT-5.1-Pro
+    let result;
+    try {
+      result = await runAIBuild(body.answers);
+    } catch (err: any) {
+      console.error("Builder Engine Failure:", err);
+      return NextResponse.json(
+        { error: "AI Builder Engine failed to process the request." },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ output }, { status: 200 });
-  } catch (err: any) {
-    console.error("AI Builder Route Error:", err);
+    // If builder returned a failure
+    if (!result || result.error) {
+      return NextResponse.json(
+        { error: result?.error ?? "Unknown AI generation error." },
+        { status: 500 }
+      );
+    }
 
+    // Successful output
     return NextResponse.json(
-      { error: err?.message ?? "AI Builder failed" },
+      { output: result },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    console.error("Unhandled AI Builder Error:", err);
+    return NextResponse.json(
+      { error: err?.message ?? "Unknown server error." },
       { status: 500 }
     );
   }
