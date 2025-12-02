@@ -17,7 +17,11 @@
 
     /* 🔥 NEW: Required for AI Builder */
     "openai": "4.33.0",
-    "react-syntax-highlighter": "15.5.0"
+    "react-syntax-highlighter": "15.5.0",
+
+    /* 📊 NEW: Usage Graph for Billing Dashboard */
+    "react-chartjs-2": "5.2.0",
+    "chart.js": "4.4.1"
   },
   "devDependencies": {
     "@types/react": "18.2.48",
