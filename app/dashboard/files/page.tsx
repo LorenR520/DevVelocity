@@ -1,247 +1,200 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
-// ----------------------------------------
-// File Portal Page — With Paste Analyzer (Option C)
-// ----------------------------------------
+/**
+ * File Portal — Main Page
+ * --------------------------------------------------
+ * Visible only to Startup / Team / Enterprise.
+ * Developer sees upgrade message.
+ */
+
 export default function FilePortalPage() {
   const [files, setFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [plan, setPlan] = useState("developer");
   const [error, setError] = useState<string | null>(null);
 
-  const [plan, setPlan] = useState<string>("developer");
-  const [pasteInput, setPasteInput] = useState("");
-  const [analysisResult, setAnalysisResult] = useState<any>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-
-  // ----------------------------------------
-  // Load user plan + files on mount
-  // ----------------------------------------
+  // --------------------------------------------------
+  // Load plan + files
+  // --------------------------------------------------
   useEffect(() => {
-    loadPortal();
+    async function load() {
+      try {
+        // Load plan from cookie
+        const planCookie = document.cookie
+          .split("; ")
+          .find((row) => row.startsWith("user_plan="));
+
+        const planValue = planCookie ? planCookie.split("=")[1] : "developer";
+        setPlan(planValue);
+
+        // If developer → don't call API
+        if (planValue === "developer") {
+          setLoading(false);
+          return;
+        }
+
+        const orgCookie = document.cookie
+          .split("; ")
+          .find((row) => row.startsWith("org_id="));
+        const orgId = orgCookie ? orgCookie.split("=")[1] : null;
+
+        if (!orgId) {
+          setError("Missing orgId cookie");
+          setLoading(false);
+          return;
+        }
+
+        // Fetch from API
+        const res = await fetch("/api/files/list", {
+          method: "POST",
+          body: JSON.stringify({ orgId, plan: planValue }),
+          headers: { "Content-Type": "application/json" },
+        });
+
+        const json = await res.json();
+        if (json.error) {
+          setError(json.error);
+        } else {
+          setFiles(json.files || []);
+        }
+      } catch (err: any) {
+        setError(err.message);
+      }
+
+      setLoading(false);
+    }
+
+    load();
   }, []);
 
-  async function loadPortal() {
-    try {
-      setLoading(true);
-
-      const userRes = await fetch("/api/user/me");
-      const userJson = await userRes.json();
-
-      setPlan(userJson?.plan ?? "developer");
-
-      if (userJson?.plan === "developer") {
-        setFiles([]);
-        setLoading(false);
-        return;
-      }
-
-      const res = await fetch("/api/files/list");
-      const json = await res.json();
-
-      if (json.error) {
-        setError(json.error);
-      } else {
-        setFiles(json.files || []);
-      }
-    } catch (err: any) {
-      setError(err.message);
-    }
-
-    setLoading(false);
-  }
-
-  // ----------------------------------------
-  // Download a saved file
-  // ----------------------------------------
-  async function downloadFile(fileId: string) {
-    const res = await fetch("/api/files/download", {
-      method: "POST",
-      body: JSON.stringify({ file_id: fileId }),
-    });
-
-    if (!res.ok) {
-      alert("Download failed.");
-      return;
-    }
-
-    const outdated = res.headers.get("X-DevVelocity-File-Outdated");
-
-    if (outdated === "true") {
-      alert(
-        "⚠️ This file was generated over 30 days ago.\n\nWe recommend pasting it into the analyzer to refresh and update the build."
-      );
-    }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "devvelocity-build.txt";
-    a.click();
-  }
-
-  // ----------------------------------------
-  // Delete a saved file
-  // ----------------------------------------
-  async function deleteFile(fileId: string) {
-    if (!confirm("Delete this file?")) return;
-
-    const res = await fetch("/api/files/delete", {
-      method: "POST",
-      body: JSON.stringify({ file_id: fileId }),
-    });
-
-    const json = await res.json();
-
-    if (json.error) {
-      alert(json.error);
-      return;
-    }
-
-    loadPortal();
-  }
-
-  // ----------------------------------------
-  // Paste → Analyze → Auto-Upgrade
-  // ----------------------------------------
-  async function analyzeBuild() {
-    if (!pasteInput.trim()) return;
-
-    setAnalyzing(true);
-    setAnalysisResult(null);
-
-    const res = await fetch("/api/ai-builder/from-file", {
-      method: "POST",
-      body: JSON.stringify({
-        file_content: pasteInput,
-        plan,
-      }),
-    });
-
-    const json = await res.json();
-    setAnalysisResult(json);
-    setAnalyzing(false);
-
-    window.scrollTo({ top: 99999, behavior: "smooth" });
-  }
-
+  // --------------------------------------------------
+  // Developer Tier View
+  // --------------------------------------------------
   if (plan === "developer") {
     return (
-      <main className="max-w-3xl mx-auto px-6 py-20 text-white">
-        <h1 className="text-3xl font-bold mb-6">File Portal (Locked)</h1>
-        <p className="text-gray-400 mb-8">
-          Saving infrastructure builds is available on:
-        </p>
-
-        <ul className="list-disc ml-6 space-y-2 text-gray-300">
-          <li>Startup</li>
-          <li>Team</li>
-          <li>Enterprise</li>
-        </ul>
-
-        <Link
-          href="/pricing"
-          className="inline-block mt-10 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
-        >
-          Upgrade Plan
-        </Link>
+      <main className="p-10 text-white">
+        <h1 className="text-3xl font-bold mb-4">File Portal</h1>
+        <div className="p-6 rounded-xl bg-yellow-900/40 border border-yellow-700 text-yellow-300">
+          🚫 File Portal is not available on the Developer plan.
+          <br />
+          <Link
+            href="/upgrade?from=file-portal"
+            className="text-yellow-200 underline mt-2 inline-block"
+          >
+            Upgrade now to unlock saved file management
+          </Link>
+        </div>
       </main>
     );
   }
 
-  // ----------------------------------------
-  // MAIN PORTAL UI
-  // ----------------------------------------
+  // --------------------------------------------------
+  // Loading View
+  // --------------------------------------------------
+  if (loading) {
+    return (
+      <main className="p-10 text-white">
+        <p className="animate-pulse text-gray-400">Loading files…</p>
+      </main>
+    );
+  }
+
+  // --------------------------------------------------
+  // Error View
+  // --------------------------------------------------
+  if (error) {
+    return (
+      <main className="p-10 text-red-400">
+        <p>Error: {error}</p>
+      </main>
+    );
+  }
+
+  // --------------------------------------------------
+  // File Portal (Startup / Team / Enterprise)
+  // --------------------------------------------------
   return (
-    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
-      <h1 className="text-3xl font-bold mb-10">Your Saved Builds</h1>
+    <main className="p-10 text-white">
+      <div className="flex justify-between items-center mb-10">
+        <h1 className="text-3xl font-bold">File Portal</h1>
 
-      {/* FILE LIST */}
-      {loading ? (
-        <p>Loading...</p>
-      ) : files.length === 0 ? (
-        <p className="text-gray-400">No saved files yet.</p>
-      ) : (
-        <div className="space-y-6 mb-12">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="p-5 bg-neutral-900 border border-neutral-800 rounded-xl flex justify-between items-center"
-            >
-              <div>
-                <p className="font-semibold">{file.name}</p>
-                <p className="text-gray-400 text-sm">
-                  Saved: {new Date(file.created_at).toLocaleString()}
-                </p>
-              </div>
-
-              <div className="flex gap-4">
-                <button
-                  onClick={() => downloadFile(file.id)}
-                  className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"
-                >
-                  Download
-                </button>
-
-                <button
-                  onClick={() => deleteFile(file.id)}
-                  className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-700"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ----------------------------- */}
-      {/* PASTE + AUTO-UPGRADE ANALYZER */}
-      {/* ----------------------------- */}
-
-      <div className="mt-16 p-8 bg-neutral-900 border border-neutral-800 rounded-xl">
-        <h2 className="text-2xl font-bold mb-4">
-          Paste a Build to Update or Fix It
-        </h2>
-
-        <p className="text-gray-400 mb-6">
-          If you downloaded a file or have an older DevVelocity build, paste it
-          below and the AI will:
-        </p>
-
-        <ul className="text-gray-300 list-disc ml-6 mb-6 space-y-2">
-          <li>Detect outdated configs</li>
-          <li>Recommend upgrades based on your plan</li>
-          <li>Auto-refresh scripts (cloud-init, docker, pipelines)</li>
-          <li>Fix version mismatches + provider changes</li>
-          <li>Enhance automation if your tier allows it</li>
-        </ul>
-
-        <textarea
-          value={pasteInput}
-          onChange={(e) => setPasteInput(e.target.value)}
-          placeholder="Paste your exported build.txt here..."
-          className="w-full min-h-[180px] p-4 bg-black/40 border border-neutral-700 rounded-lg text-sm text-white"
-        />
-
-        <button
-          onClick={analyzeBuild}
-          disabled={analyzing}
-          className="mt-6 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold"
+        <Link
+          href="/dashboard/files/new"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium"
         >
-          {analyzing ? "Analyzing..." : "Update This Build"}
-        </button>
+          + New File
+        </Link>
+      </div>
 
-        {/* AI RESULT */}
-        {analysisResult && (
-          <pre className="mt-10 whitespace-pre-wrap text-sm p-4 bg-black/40 border border-neutral-700 rounded-lg">
-{JSON.stringify(analysisResult, null, 2)}
-          </pre>
-        )}
+      {/* File Table */}
+      <div className="overflow-hidden border border-neutral-800 rounded-xl">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-neutral-900">
+            <tr className="text-gray-400 text-sm">
+              <th className="p-4">File Name</th>
+              <th className="p-4">Description</th>
+              <th className="p-4">Versions</th>
+              <th className="p-4">Last Updated</th>
+              <th className="p-4 text-right">Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {files.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="text-center text-gray-500 p-6 italic"
+                >
+                  No saved files yet.
+                </td>
+              </tr>
+            )}
+
+            {files.map((file) => (
+              <tr
+                key={file.id}
+                className="border-t border-neutral-800 hover:bg-neutral-900/40"
+              >
+                <td className="p-4 font-medium">{file.filename}</td>
+
+                <td className="p-4">{file.description || "—"}</td>
+
+                <td className="p-4">{file.version_count || 0}</td>
+
+                <td className="p-4">
+                  {new Date(file.updated_at).toLocaleString()}
+                </td>
+
+                <td className="p-4 text-right space-x-3">
+                  <Link
+                    href={`/dashboard/files/view?id=${file.id}`}
+                    className="text-blue-400 hover:text-blue-300"
+                  >
+                    View
+                  </Link>
+
+                  <Link
+                    href={`/dashboard/files/update?id=${file.id}`}
+                    className="text-green-400 hover:text-green-300"
+                  >
+                    Update
+                  </Link>
+
+                  <Link
+                    href={`/dashboard/files/history?id=${file.id}`}
+                    className="text-yellow-400 hover:text-yellow-300"
+                  >
+                    History
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </main>
   );
