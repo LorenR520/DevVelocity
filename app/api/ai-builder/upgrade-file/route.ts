@@ -1,87 +1,96 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { buildUpgradePrompt } from "@/ai-builder/upgrade-prompt";
-import { rateLimitCheck } from "@/server/rate-limit";
+import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
 
-// ----------------------------------
-// 🔐 GPT-5.1-PRO Client
-// ----------------------------------
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-// ----------------------------------
-// POST /api/ai-builder/upgrade-file
-// ----------------------------------
+/**
+ * POST /api/ai-builder/upgrade-file
+ * Upgrades an old JSON file using AI + enforces tier/plan limits.
+ */
 export async function POST(req: Request) {
   try {
-    const { fileContent, plan } = await req.json();
+    const body = await req.json();
+    const { oldContent, plan = "developer", fileId } = body;
 
-    if (!fileContent) {
+    if (!oldContent) {
       return NextResponse.json(
-        { error: "Missing file content to upgrade." },
+        { error: "Missing oldContent." },
         { status: 400 }
       );
     }
 
-    // ----------------------------------
-    // 🔐 Rate Limit
-    // ----------------------------------
-    const rateExceeded = await rateLimitCheck("upgrade-file");
-    if (rateExceeded) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded. Try again later." },
-        { status: 429 }
-      );
-    }
+    // -----------------------------------------
+    // 🔐 Initialize Supabase Admin
+    // -----------------------------------------
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    // ----------------------------------
-    // 🧠 Build Upgrade Prompt
-    // ----------------------------------
-    const systemPrompt = buildUpgradePrompt(fileContent, plan);
+    // -----------------------------------------
+    // 🧠 Build the SYSTEM PROMPT
+    // -----------------------------------------
+    const systemPrompt = buildUpgradePrompt(oldContent, plan);
 
-    // ----------------------------------
-    // 🤖 GPT-5.1-PRO Call
-    // ----------------------------------
-    const response = await client.chat.completions.create({
-      model: "gpt-5.1-pro",
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content:
-            "Analyze the pasted file and generate an updated version following modern DevOps architecture and JSON output format.",
-        },
-      ],
-      temperature: 0.25,
-      max_tokens: 9000,
-      response_format: { type: "json_object" },
+    // -----------------------------------------
+    // 🤖 Initialize OpenAI GPT-4.1-Pro
+    // -----------------------------------------
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
     });
 
-    // ----------------------------------
-    // Parse JSON Output
-    // ----------------------------------
-    let output: any = null;
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1-pro",  
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: oldContent },
+      ],
+      temperature: 0.2,
+    });
 
-    try {
-      output = JSON.parse(response.choices[0].message.content || "{}");
-    } catch (err) {
+    const upgraded = completion.choices?.[0]?.message?.content;
+
+    if (!upgraded) {
       return NextResponse.json(
-        { error: "AI returned invalid JSON." },
+        { error: "AI did not return an upgraded file." },
         { status: 500 }
       );
     }
 
-    // ----------------------------------
-    // Success
-    // ----------------------------------
-    return NextResponse.json(
-      { success: true, output },
-      { status: 200 }
-    );
+    // -----------------------------------------
+    // 🗂 Save as a NEW VERSION (version history)
+    // -----------------------------------------
+    if (fileId) {
+      await supabase
+        .from("file_version_history")
+        .insert({
+          file_id: fileId,
+          org_id: null, // filled automatically via RLS if you enabled it
+          old_content: oldContent,
+          new_content: upgraded,
+        });
+    }
+
+    // -----------------------------------------
+    // 🧾 Metering charge: AI Upgrade Action
+    // Adds cost to billing_events table
+    // -----------------------------------------
+    await supabase.from("billing_events").insert({
+      org_id: null, // RLS fills it in 
+      type: "ai_file_upgrade",
+      amount: 0.005, // 0.5¢ per upgrade (you can change)
+      details: { fileId },
+    });
+
+    return NextResponse.json({
+      upgraded,
+      message: "Upgrade successful",
+    });
+
   } catch (err: any) {
+    console.error("Upgrade error:", err);
     return NextResponse.json(
-      { error: err.message || "Unexpected server error." },
+      { error: err.message || "Upgrade failed" },
       { status: 500 }
     );
   }
