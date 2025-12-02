@@ -1,112 +1,175 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import BillingUsageGraph from "@/components/BillingUsageGraph";
-import BillingPlanSummary from "@/components/BillingPlanSummary";
+import { useRouter } from "next/navigation";
 
 export default function BillingPage() {
-  const [orgId, setOrgId] = useState<string | null>(null);
-  const [plan, setPlan] = useState<string>("developer");
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<any>(null);
+  const [usage, setUsage] = useState<any[]>([]);
+  const [totals, setTotals] = useState<any>({});
+  const [limits, setLimits] = useState<any>({});
+  const [recommendations, setRecommendations] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // -----------------------------------------------------
-  // Load org + plan from cookies or localStorage
-  // -----------------------------------------------------
+  const router = useRouter();
+
+  // Reads plan + org_id from cookies (injected by middleware)
+  const orgId =
+    typeof document !== "undefined"
+      ? document.cookie
+          .split("; ")
+          .find((c) => c.startsWith("org_id="))
+          ?.split("=")[1]
+      : null;
+
+  const plan =
+    typeof document !== "undefined"
+      ? document.cookie
+          .split("; ")
+          .find((c) => c.startsWith("user_plan="))
+          ?.split("=")[1]
+      : "developer";
+
   useEffect(() => {
-    const storedOrg = window.localStorage.getItem("org_id");
-    const storedPlan = window.localStorage.getItem("user_plan");
+    async function load() {
+      try {
+        const res = await fetch("/api/usage/get", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orgId, plan }),
+        });
 
-    if (storedOrg) setOrgId(storedOrg);
-    if (storedPlan) setPlan(storedPlan);
+        const json = await res.json();
 
-    if (storedOrg) loadSummary(storedOrg);
-  }, []);
-
-  // -----------------------------------------------------
-  // Load plan summary from API
-  // -----------------------------------------------------
-  async function loadSummary(org: string) {
-    try {
-      setLoading(true);
-
-      const res = await fetch("/api/billing/plan-summary", {
-        method: "POST",
-        body: JSON.stringify({ orgId: org }),
-        headers: { "Content-Type": "application/json" }
-      });
-
-      const json = await res.json();
-      if (json.error) {
-        setError(json.error);
-      } else {
-        setSummary(json.plan);
+        if (json.error) {
+          setError(json.error);
+        } else {
+          setUsage(json.usage);
+          setTotals(json.totals);
+          setLimits(json.limits);
+          setRecommendations(json.recommendations);
+        }
+      } catch (err: any) {
+        setError(err.message ?? "Failed to load billing data.");
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to load billing data.");
-    }
-    setLoading(false);
-  }
 
-  // -----------------------------------------------------
-  // Render
-  // -----------------------------------------------------
-  if (!orgId) {
-    return (
-      <main className="text-center text-gray-400 py-20">
-        No organization selected.
-      </main>
-    );
-  }
+      setLoading(false);
+    }
+
+    if (orgId) load();
+  }, [orgId, plan]);
 
   if (loading) {
     return (
-      <main className="text-center text-gray-300 py-20">
-        Loading billing dashboard...
-      </main>
+      <div className="text-gray-300 animate-pulse">Loading billing data…</div>
     );
   }
 
-  if (error) {
+  if (plan === "developer") {
     return (
-      <main className="text-center text-red-400 py-20">
-        {error}
-      </main>
+      <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800">
+        <h2 className="text-2xl font-bold mb-4">Billing & Usage</h2>
+        <p className="text-gray-400">
+          Developer tier does not include usage analytics.
+        </p>
+        <button
+          onClick={() => router.push("/upgrade?from=billing")}
+          className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
+        >
+          Upgrade Plan
+        </button>
+      </div>
     );
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-6 py-16 text-white">
+    <div className="space-y-10">
+      <h1 className="text-3xl font-bold">Billing & Usage</h1>
 
-      {/* Title */}
-      <h1 className="text-3xl font-bold mb-10">Billing Overview</h1>
+      {/* -------- TOTALS CARD -------- */}
+      <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800">
+        <h2 className="text-xl font-semibold mb-4">Monthly Totals</h2>
 
-      {/* Plan Summary */}
-      {summary && <BillingPlanSummary summary={summary} />}
+        <div className="grid grid-cols-3 gap-6 text-sm">
+          <div className="p-4 bg-neutral-800/40 rounded-lg">
+            <p className="text-gray-400">Pipelines Run</p>
+            <p className="text-2xl font-bold">{totals.pipelines_run ?? 0}</p>
+            <p className="text-gray-500 text-xs">
+              Limit: {limits.max_pipelines === Infinity ? "∞" : limits.max_pipelines}
+            </p>
+          </div>
 
-      {/* Usage Graph */}
-      <BillingUsageGraph orgId={orgId} />
+          <div className="p-4 bg-neutral-800/40 rounded-lg">
+            <p className="text-gray-400">API Calls</p>
+            <p className="text-2xl font-bold">{totals.provider_api_calls ?? 0}</p>
+            <p className="text-gray-500 text-xs">
+              Limit:{" "}
+              {limits.max_provider_calls === Infinity
+                ? "∞"
+                : limits.max_provider_calls}
+            </p>
+          </div>
 
-      {/* Upgrade Nudges */}
-      {plan === "developer" && (
-        <div className="mt-10 p-6 bg-yellow-900/40 rounded-lg border border-yellow-700">
-          <h3 className="text-xl font-semibold mb-2 text-yellow-300">
-            Unlock full Billing Insights
+          <div className="p-4 bg-neutral-800/40 rounded-lg">
+            <p className="text-gray-400">Build Minutes</p>
+            <p className="text-2xl font-bold">{totals.build_minutes ?? 0}</p>
+            <p className="text-gray-500 text-xs">
+              Limit:{" "}
+              {limits.max_build_minutes === Infinity
+                ? "∞"
+                : limits.max_build_minutes}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* -------- UPGRADE RECOMMENDATIONS -------- */}
+      {recommendations.length > 0 && (
+        <div className="p-6 rounded-xl bg-yellow-900/30 border border-yellow-700">
+          <h3 className="text-lg font-bold text-yellow-300 mb-3">
+            Usage Recommendations
           </h3>
-          <p className="text-yellow-200 mb-4">
-            Upgrade your plan to track multi-cloud deployments, pipeline automation,
-            and advanced AI cost projections.
-          </p>
+          <ul className="list-disc ml-5 text-yellow-200 text-sm space-y-1">
+            {recommendations.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
 
-          <a
-            href="/upgrade?from=billing"
-            className="inline-block bg-yellow-600 hover:bg-yellow-700 px-5 py-2 rounded font-medium"
+          <button
+            onClick={() => router.push("/upgrade")}
+            className="mt-4 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-black rounded font-semibold"
           >
-            Upgrade Plan
-          </a>
+            Explore Upgrade Options
+          </button>
         </div>
       )}
-    </main>
+
+      {/* -------- DAILY LOGS TABLE -------- */}
+      <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800">
+        <h2 className="text-xl font-semibold mb-4">Daily Usage Logs</h2>
+
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-gray-400 border-b border-neutral-800">
+              <th className="py-2 text-left">Date</th>
+              <th className="py-2 text-left">Pipelines</th>
+              <th className="py-2 text-left">API Calls</th>
+              <th className="py-2 text-left">Build Minutes</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {usage.map((u) => (
+              <tr key={u.id} className="border-b border-neutral-800">
+                <td className="py-2">{new Date(u.date).toLocaleDateString()}</td>
+                <td>{u.pipelines_run}</td>
+                <td>{u.provider_api_calls}</td>
+                <td>{u.build_minutes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
