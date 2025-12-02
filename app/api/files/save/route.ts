@@ -1,97 +1,162 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+/**
+ * SAVE or UPDATE a file
+ * --------------------------------------------------
+ * Supports:
+ *   - Creating a NEW saved infrastructure file
+ *   - Updating an existing file's metadata or content
+ *
+ * Tier Rules:
+ *   - Developer → NO ACCESS (must upgrade)
+ *   - Startup / Team / Enterprise → Full access
+ *
+ * Versioning:
+ *   - If content changes, automatically store previous
+ *     version in file_version_history
+ *
+ * Usage Tracking:
+ *   - Each save/update = 1 "activity" credit
+ */
+
 export async function POST(req: Request) {
   try {
-    const { filename, content } = await req.json();
+    const { orgId, plan, fileId, filename, description, content, userId } =
+      await req.json();
 
-    if (!filename || !content) {
+    if (!orgId || !filename || !content) {
       return NextResponse.json(
-        { error: "Filename and content required" },
+        { error: "Missing required fields: orgId, filename, or content" },
         { status: 400 }
       );
     }
 
-    // ------------------------------------------------
-    // 🔐 1. Auth: Get logged-in user
-    // ------------------------------------------------
-    const supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_ANON_KEY!
-    );
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // ------------------------------------------------
-    // 📦 2. Enforce Plan Gating
-    // ------------------------------------------------
-    const plan = user.app_metadata?.plan ?? "developer";
-    const allowedPlans = ["startup", "team", "enterprise"];
-
-    if (!allowedPlans.includes(plan)) {
+    // --------------------------------------------------
+    // Tier restriction: Developer CANNOT save files
+    // --------------------------------------------------
+    if (plan === "developer") {
       return NextResponse.json(
         {
-          error:
-            "File Portal is available only for Startup, Team, and Enterprise plans.",
+          error: "Upgrade required to save infrastructure files.",
+          upgrade_required: true,
         },
-        { status: 403 }
+        { status: 401 }
       );
     }
 
-    // ------------------------------------------------
-    // 📥 3. Save File to Supabase Storage
-    // ------------------------------------------------
-    const path = `${user.id}/${Date.now()}-${filename}`;
+    // --------------------------------------------------
+    // Supabase client
+    // --------------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-    const upload = await supabase.storage
-      .from("user-files")
-      .upload(path, content, {
-        upsert: false,
+    // --------------------------------------------------
+    // If updating an existing file
+    // --------------------------------------------------
+    if (fileId) {
+      // Load the current file
+      const { data: existing, error: loadErr } = await supabase
+        .from("files")
+        .select("content, org_id")
+        .eq("id", fileId)
+        .single();
+
+      if (loadErr || !existing) {
+        return NextResponse.json(
+          { error: "File not found" },
+          { status: 404 }
+        );
+      }
+
+      if (existing.org_id !== orgId) {
+        return NextResponse.json(
+          { error: "Unauthorized: Org mismatch" },
+          { status: 403 }
+        );
+      }
+
+      // If content changed → add version history
+      if (existing.content !== content) {
+        await supabase.from("file_version_history").insert({
+          file_id: fileId,
+          org_id: orgId,
+          previous_content: existing.content,
+          new_content: content,
+          change_summary: "Manual update via File Portal",
+        });
+      }
+
+      // Update the file itself
+      await supabase
+        .from("files")
+        .update({
+          filename,
+          description,
+          content,
+          updated_at: new Date().toISOString(),
+          last_modified_by: userId ?? null,
+        })
+        .eq("id", fileId);
+
+      // Log usage
+      await supabase.from("usage_logs").insert({
+        org_id: orgId,
+        pipelines_run: 0,
+        provider_api_calls: 0,
+        build_minutes: 0,
+        date: new Date().toISOString(),
       });
 
-    if (upload.error) {
-      console.error(upload.error);
+      return NextResponse.json({
+        success: true,
+        message: "File updated successfully",
+        fileId,
+      });
+    }
+
+    // --------------------------------------------------
+    // Creating a NEW file
+    // --------------------------------------------------
+    const { data: created, error: createErr } = await supabase
+      .from("files")
+      .insert({
+        org_id: orgId,
+        filename,
+        description,
+        content,
+        last_modified_by: userId ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (createErr || !created) {
       return NextResponse.json(
-        { error: "File upload failed" },
+        { error: "Failed to create file" },
         { status: 500 }
       );
     }
 
-    // ------------------------------------------------
-    // 🗄️ 4. Save File Metadata to DB
-    // ------------------------------------------------
-    const { error: dbErr } = await supabase.from("user_files").insert({
-      user_id: user.id,
-      filename,
-      storage_path: path,
-      created_at: new Date().toISOString(),
+    // Log usage
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      pipelines_run: 0,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
     });
-
-    if (dbErr) {
-      console.error(dbErr);
-      return NextResponse.json(
-        { error: "Database insert failed" },
-        { status: 500 }
-      );
-    }
 
     return NextResponse.json({
       success: true,
-      file: {
-        filename,
-        path,
-      },
+      message: "File saved successfully",
+      fileId: created.id,
     });
   } catch (err: any) {
-    console.error("File save error:", err);
+    console.error("Save file error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Server error" },
+      { error: err.message ?? "Internal server error" },
       { status: 500 }
     );
   }
