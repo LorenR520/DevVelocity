@@ -2,39 +2,38 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * LIST VERSION HISTORY FOR A FILE
+ * RESTORE A PREVIOUS FILE VERSION
  * ---------------------------------------------------
  * Tier Access:
- *  - Developer → No access (must upgrade)
+ *  - Developer → No access
  *  - Startup / Team / Enterprise → allowed
  *
- * Returned:
- *  - version_id
- *  - previous_content
- *  - new_content
- *  - change_summary
- *  - created_at
+ * Steps:
+ *  1. Validate request
+ *  2. Verify file + version belong to org
+ *  3. Replace current file content
+ *  4. Log restore into file_version_history
+ *  5. Meter usage
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId, orgId, plan } = await req.json();
+    const { fileId, versionId, orgId, plan } = await req.json();
 
-    if (!fileId || !orgId) {
+    if (!fileId || !versionId || !orgId) {
       return NextResponse.json(
-        { error: "Missing fileId or orgId" },
+        { error: "Missing fileId, versionId, or orgId" },
         { status: 400 }
       );
     }
 
     // --------------------------------------------------
-    // Developer tier → no access
+    // Developer tier cannot restore versions
     // --------------------------------------------------
     if (plan === "developer") {
       return NextResponse.json(
         {
-          versions: [],
-          message: "Upgrade required to view version history.",
+          error: "Upgrade required to restore file versions.",
           upgrade_required: true,
         },
         { status: 401 }
@@ -50,60 +49,83 @@ export async function POST(req: Request) {
     );
 
     // --------------------------------------------------
-    // Validate file belongs to org
+    // Validate file exists + belongs to org
     // --------------------------------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
-      .select("id, org_id, filename")
+      .select("id, org_id, content, filename")
       .eq("id", fileId)
       .single();
 
     if (fileErr || !file) {
+      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    }
+
+    if (file.org_id !== orgId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    // --------------------------------------------------
+    // Fetch version to restore
+    // --------------------------------------------------
+    const { data: version, error: versionErr } = await supabase
+      .from("file_version_history")
+      .select("id, new_content, created_at, change_summary")
+      .eq("id", versionId)
+      .eq("org_id", orgId)
+      .eq("file_id", fileId)
+      .single();
+
+    if (versionErr || !version) {
       return NextResponse.json(
-        { error: "File not found" },
+        { error: "Version not found" },
         { status: 404 }
       );
     }
 
-    if (file.org_id !== orgId) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 403 }
-      );
-    }
+    const restoredContent = version.new_content;
 
     // --------------------------------------------------
-    // Fetch version history
+    // Update the current file with restored content
     // --------------------------------------------------
-    const { data: versions, error: versionErr } = await supabase
-      .from("file_version_history")
-      .select(
-        `
-        id,
-        previous_content,
-        new_content,
-        change_summary,
-        created_at
-      `
-      )
-      .eq("file_id", fileId)
-      .eq("org_id", orgId)
-      .order("created_at", { ascending: false });
+    await supabase
+      .from("files")
+      .update({
+        content: restoredContent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", fileId);
 
-    if (versionErr) {
-      return NextResponse.json(
-        { error: "Failed to load version history" },
-        { status: 500 }
-      );
-    }
+    // --------------------------------------------------
+    // Log restore as a new version record
+    // --------------------------------------------------
+    await supabase.from("file_version_history").insert({
+      file_id: fileId,
+      org_id: orgId,
+      previous_content: file.content,
+      new_content: restoredContent,
+      change_summary: `Restored to version ${versionId} from ${version.created_at}`,
+    });
+
+    // --------------------------------------------------
+    // Meter Usage (Restore = 1 pipeline usage)
+    // --------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      pipelines_run: 1,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
+    });
 
     return NextResponse.json({
-      fileId,
+      restored: true,
+      message: `Restored to version ${versionId}`,
       filename: file.filename,
-      versions: versions ?? [],
+      content: restoredContent,
     });
   } catch (err: any) {
-    console.error("Version list API error:", err);
+    console.error("Restore-version API error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
