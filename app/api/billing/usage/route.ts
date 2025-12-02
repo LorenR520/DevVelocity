@@ -1,22 +1,15 @@
+// app/api/billing/usage/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
  * BILLING USAGE API
- * ------------------------------------
- * Returns monthly aggregated usage:
- *  - pipelines_run
- *  - provider_api_calls
- *  - build_minutes
- *  - ai_builds
- *  - ai_upgrades
- * 
- * Supports:
- *  - Startup
- *  - Team
- *  - Enterprise
- * 
- * Developer tier → not allowed, returns upgrade message.
+ * -----------------------------------------
+ * Returns:
+ *  - All usage logs for the org
+ *  - Aggregated totals
+ *  - Requires Startup+ tier (Developer blocked)
  */
 
 export async function POST(req: Request) {
@@ -30,47 +23,40 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Developer tier = restricted
-    // --------------------------------------------------
+    // -----------------------------------------
+    // Developer cannot view billing usage
+    // -----------------------------------------
     if (plan === "developer") {
-      return NextResponse.json({
-        usage: {
-          pipelines_run: 0,
-          provider_api_calls: 0,
-          build_minutes: 0,
-          ai_builds: 0,
-          ai_upgrades: 0,
+      return NextResponse.json(
+        {
+          usage: [],
+          totals: {
+            pipelines_run: 0,
+            provider_api_calls: 0,
+            build_minutes: 0,
+          },
+          message: "Upgrade required to access usage analytics.",
         },
-        message: "Upgrade required to view monthly usage.",
-      });
+        { status: 403 }
+      );
     }
 
-    // --------------------------------------------------
-    // Supabase client (admin access)
-    // --------------------------------------------------
+    // -----------------------------------------
+    // Supabase Admin
+    // -----------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // --------------------------------------------------
-    // Fetch usage logs for this organization
-    // --------------------------------------------------
+    // -----------------------------------------
+    // Fetch usage logs for org
+    // -----------------------------------------
     const { data: logs, error: logsErr } = await supabase
       .from("usage_logs")
-      .select(
-        `
-        id,
-        pipelines_run,
-        provider_api_calls,
-        build_minutes,
-        date
-      `
-      )
+      .select("*")
       .eq("org_id", orgId)
-      .gte("date", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
-      .order("date", { ascending: true });
+      .order("date", { ascending: false });
 
     if (logsErr) {
       return NextResponse.json(
@@ -79,38 +65,29 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Aggregate monthly values
-    // --------------------------------------------------
-    let totalPipelines = 0;
-    let totalProviderCalls = 0;
-    let totalMinutes = 0;
+    // -----------------------------------------
+    // Compute Totals
+    // -----------------------------------------
+    const totals = {
+      pipelines_run: 0,
+      provider_api_calls: 0,
+      build_minutes: 0,
+    };
 
-    logs?.forEach((row) => {
-      totalPipelines += row.pipelines_run ?? 0;
-      totalProviderCalls += row.provider_api_calls ?? 0;
-      totalMinutes += row.build_minutes ?? 0;
+    logs?.forEach((l) => {
+      totals.pipelines_run += l.pipelines_run ?? 0;
+      totals.provider_api_calls += l.provider_api_calls ?? 0;
+      totals.build_minutes += l.build_minutes ?? 0;
     });
 
-    // --------------------------------------------------
-    // AI usage is counted via pipelines (per your design)
-    // --------------------------------------------------
-    const aiBuilds = totalPipelines; 
-    const aiUpgrades = 0; // upgrades counted separately in future if needed
-
     return NextResponse.json({
-      usage: {
-        pipelines_run: totalPipelines,
-        provider_api_calls: totalProviderCalls,
-        build_minutes: totalMinutes,
-        ai_builds: aiBuilds,
-        ai_upgrades: aiUpgrades,
-      },
+      usage: logs ?? [],
+      totals,
     });
   } catch (err: any) {
     console.error("Billing usage error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message || "Internal server error" },
       { status: 500 }
     );
   }
