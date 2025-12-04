@@ -2,92 +2,127 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * LIST ALL FILES FOR USER'S ORG
- *
- * This endpoint powers:
- *  - /dashboard/files
- *  - update/edit page preloading
- *  - version history modal
- *  - restore-file operation
- *  - AI upgrade (needs fileId)
+ * FILE VERSION LIST
+ * ------------------------------
+ * Returns *all* previous versions of a file.
  *
  * Tier Rules:
- *  - Developer     → no access (returns empty list + upgrade CTA)
- *  - Startup       → full access
- *  - Team          → full access
- *  - Enterprise    → full access + future multi-org support
+ *  - developer → ❌ blocked
+ *  - startup/team/enterprise → ✅ allowed
+ *
+ * Safety:
+ *  - Requires orgId + fileId
+ *  - Ensures file belongs to org
+ *  - Excludes deleted entries
  */
 
 export async function POST(req: Request) {
   try {
-    const { orgId, plan } = await req.json();
+    const { fileId, orgId, plan } = await req.json();
 
-    if (!orgId) {
+    if (!fileId || !orgId) {
       return NextResponse.json(
-        { error: "Missing orgId" },
+        { error: "Missing fileId or orgId" },
         { status: 400 }
       );
     }
 
     const tier = plan ?? "developer";
 
-    // --------------------------------------------------
-    // 1. Developer Tier → Blocked
-    // --------------------------------------------------
+    // -------------------------------------------------------
+    // 🚫 Developer plan has NO access to File Portal
+    // -------------------------------------------------------
     if (tier === "developer") {
-      return NextResponse.json({
-        files: [],
-        upgrade_required: true,
-        message: "The File Portal is available on Startup, Team, and Enterprise plans.",
-      });
+      return NextResponse.json(
+        {
+          versions: [],
+          upgrade_required: true,
+          message:
+            "Upgrade to Startup to unlock version history and file restoration.",
+        },
+        { status: 403 }
+      );
     }
 
-    // --------------------------------------------------
-    // 2. Supabase service-role client
-    //    (Required for reading version counts)
-    // --------------------------------------------------
+    // -------------------------------------------------------
+    // Supabase service role client (required for RLS bypass +
+    // selecting across file + version tables)
+    // -------------------------------------------------------
     const supabase = createClient(
-      process.env.SUPABASE_URL!,               // Use secure internal URL
-      process.env.SUPABASE_SERVICE_ROLE_KEY!   // Required for RLS bypass + joins
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // --------------------------------------------------
-    // 3. Fetch all active (non-deleted) files
-    // --------------------------------------------------
-    const { data: files, error: filesErr } = await supabase
+    // -------------------------------------------------------
+    // 1. Verify file exists + belongs to org
+    // -------------------------------------------------------
+    const { data: file, error: fileErr } = await supabase
       .from("files")
+      .select("id, org_id, deleted_at")
+      .eq("id", fileId)
+      .eq("org_id", orgId)
+      .single();
+
+    if (fileErr || !file) {
+      return NextResponse.json(
+        { error: "File not found or access denied" },
+        { status: 404 }
+      );
+    }
+
+    if (file.deleted_at) {
+      return NextResponse.json(
+        { error: "This file has been deleted." },
+        { status: 410 }
+      );
+    }
+
+    // -------------------------------------------------------
+    // 2. Load version history (most recent → oldest)
+    // -------------------------------------------------------
+    const { data: versions, error: verErr } = await supabase
+      .from("file_version_history")
       .select(
         `
-        id,
-        filename,
-        description,
-        org_id,
-        created_at,
-        updated_at,
-        deleted_at,
-        last_modified_by,
-        version_count: file_version_history(count)
-      `
+          id,
+          file_id,
+          org_id,
+          previous_content,
+          new_content,
+          change_summary,
+          created_at
+        `
       )
+      .eq("file_id", fileId)
       .eq("org_id", orgId)
-      .is("deleted_at", null)
-      .order("updated_at", { ascending: false });
+      .order("created_at", { ascending: false });
 
-    if (filesErr) {
-      console.error("Supabase filesErr:", filesErr);
+    if (verErr) {
+      console.error("Version history load error:", verErr);
       return NextResponse.json(
-        { error: "Failed to load files" },
+        { error: "Failed to load version history" },
         { status: 500 }
       );
     }
 
+    // -------------------------------------------------------
+    // 3. Sanitize + format versions for UI
+    // -------------------------------------------------------
+    const formatted = (versions ?? []).map((v) => ({
+      id: v.id,
+      file_id: v.file_id,
+      created_at: v.created_at,
+      change_summary: v.change_summary,
+      previous_content: v.previous_content,
+      new_content: v.new_content,
+    }));
+
     return NextResponse.json({
-      files: files ?? [],
+      versions: formatted,
       upgrade_required: false,
     });
-
   } catch (err: any) {
-    console.error("File list error:", err);
+    console.error("version-list error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
