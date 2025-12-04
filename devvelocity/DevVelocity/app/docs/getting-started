@@ -1,0 +1,56 @@
+// app/docs/getting-started/login/page.tsx
+
+export const metadata = {
+  title: "How to Log In – DevVelocity Docs",
+  description:
+    "Learn how to log in to your DevVelocity account to access enterprise-grade images, pipelines, and cloud provider integrations.",
+};
+
+export default function LoginDocsPage() {
+  return (
+    <div className="prose dark:prose-invert max-w-none">
+      <h1>How to Log In</h1>
+
+      <p>
+        Accessing your DevVelocity account lets you manage cloud images, view
+        deployments, upgrade your subscription, and access enterprise build
+        pipelines.
+      </p>
+
+      <h2>Steps to Log In</h2>
+      <ol>
+        <li>
+          Navigate to the{" "}
+          <a href="/auth/login" className="text-blue-600">
+            Login Page
+          </a>
+          .
+        </li>
+        <li>Enter your registered email address.</li>
+        <li>Type your password.</li>
+        <li>Click <strong>Sign In</strong>.</li>
+      </ol>
+
+      <h2>Forgot Your Password?</h2>
+      <p>
+        DevVelocity uses Supabase authentication. A password reset feature will
+        be added soon. For now, if you need help accessing your account, contact
+        your administrator or create a new account.
+      </p>
+
+      <h2>New to DevVelocity?</h2>
+      <p>
+        If you don’t have an account yet, you can sign up instantly:
+      </p>
+
+      <p>
+        <a
+          href="/auth/signup"
+          className="inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+          Create Account
+        </a>
+      </p>
+    </div>
+  );
+}
