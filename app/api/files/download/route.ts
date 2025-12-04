@@ -1,75 +1,147 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
 
 /**
- * DOWNLOAD FILE API
+ * DOWNLOAD FILE OR VERSION
+ *
+ * GET /api/files/download?id=123
+ * GET /api/files/download?id=456&type=version
  *
  * Rules:
- *  - Developer tier cannot download (upgrade prompt)
- *  - Must verify org ownership
- *  - Returns the file content as a downloadable attachment
- *  - Safe for Cloudflare Pages runtime
+ * - Developer tier cannot download
+ * - Must verify authenticated user belongs to file's org
+ * - Supports version downloads via file_version_history
  */
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   try {
-    const { fileId, plan } = await req.json();
+    const supabase = createClient();
+    const { searchParams } = new URL(req.url);
 
-    if (!fileId || !plan) {
+    const id = searchParams.get("id");
+    const type = searchParams.get("type"); // optional: "version"
+
+    if (!id) {
       return NextResponse.json(
-        { error: "Missing fileId or plan" },
+        { error: "Missing file ID" },
         { status: 400 }
       );
     }
 
-    // 🔒 Developer plan not allowed to download files
+    // ------------------------------------------
+    // 1. Verify user is authenticated
+    // ------------------------------------------
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    // ------------------------------------------
+    // 2. Load user’s org + plan
+    // ------------------------------------------
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("org_id")
+      .eq("id", user.id)
+      .single();
+
+    if (!profile?.org_id) {
+      return NextResponse.json(
+        { error: "User not assigned to an organization" },
+        { status: 403 }
+      );
+    }
+
+    const orgId = profile.org_id;
+
+    const { data: org } = await supabase
+      .from("organizations")
+      .select("plan_id")
+      .eq("id", orgId)
+      .single();
+
+    const plan = org?.plan_id ?? "developer";
+
+    // Developer tier cannot download files
     if (plan === "developer") {
       return NextResponse.json(
         {
-          error: "Your plan does not include downloading saved builds.",
+          error: "Downloads are not available on the Developer plan.",
           upgrade: true,
-          upgradeMessage: "Upgrade to Startup to unlock downloading your generated files."
+          upgradeMessage:
+            "Upgrade to the Startup Tier to unlock file downloads.",
         },
         { status: 403 }
       );
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // ------------------------------------------
+    // 3. Fetch file or version safely with RLS
+    // ------------------------------------------
+    let record: any = null;
 
-    // Load file from database
-    const { data: file, error: fileErr } = await supabase
-      .from("files")
-      .select("*")
-      .eq("id", fileId)
-      .single();
+    if (type === "version") {
+      // Load version history entry
+      const { data, error } = await supabase
+        .from("file_version_history")
+        .select("*")
+        .eq("id", id)
+        .eq("org_id", orgId) // ensure ownership
+        .single();
 
-    if (fileErr || !file) {
-      return NextResponse.json(
-        { error: "File not found" },
-        { status: 404 }
-      );
+      if (error || !data) {
+        return NextResponse.json(
+          { error: "Version not found" },
+          { status: 404 }
+        );
+      }
+
+      record = {
+        filename: `version-${data.id}.txt`,
+        content: data.new_content,
+      };
+    } else {
+      // Load main file
+      const { data, error } = await supabase
+        .from("files")
+        .select("*")
+        .eq("id", id)
+        .eq("org_id", orgId)
+        .single();
+
+      if (error || !data) {
+        return NextResponse.json(
+          { error: "File not found" },
+          { status: 404 }
+        );
+      }
+
+      record = {
+        filename: data.filename,
+        content: data.content,
+      };
     }
 
-    const fileContent = file.content;
-    const filename = file.filename ?? "devvelocity-build.txt";
-
-    // -----------------------------
-    // Serve the file for download
-    // -----------------------------
-    return new Response(fileContent, {
+    // ------------------------------------------
+    // 4. Serve file content for download
+    // ------------------------------------------
+    return new Response(record.content ?? "", {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${record.filename}"`,
       },
     });
   } catch (err: any) {
-    console.error("Download error:", err);
+    console.error("Download API error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal download error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
