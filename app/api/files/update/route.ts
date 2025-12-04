@@ -1,62 +1,73 @@
-// app/api/files/update/route.ts
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
  * UPDATE EXISTING SAVED FILE
  * --------------------------------------------------------
- * Required Inputs:
- *  {
- *    fileId: string,
- *    orgId: string,
- *    plan: string,
- *    newContent: string,
- *    userId: string
- *  }
+ * Required Request Body:
+ * {
+ *   fileId: string,
+ *   orgId: string,
+ *   userId: string,
+ *   plan: "developer" | "startup" | "team" | "enterprise",
+ *   newContent: string
+ * }
  *
  * Behavior:
- *  - Developer tier → ❌ blocked
- *  - Startup / Team / Enterprise → allowed
- *  - Creates new version in file_version_history
- *  - Updates main file record
- *  - Logs usage
+ *  - Developer  → ❌ blocked
+ *  - Startup    → ✔ allowed
+ *  - Team       → ✔ allowed
+ *  - Enterprise → ✔ allowed
+ *
+ * Actions:
+ *  - Validates org ownership
+ *  - Saves previous content to file_version_history
+ *  - Updates main file content
+ *  - Logs 1 pipeline event to usage_logs
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId, orgId, plan, newContent, userId } = await req.json();
+    const { fileId, orgId, userId, plan, newContent } = await req.json();
 
-    if (!fileId || !orgId || !newContent || !userId) {
+    // --------------------------------------------------
+    // Validate required fields
+    // --------------------------------------------------
+    if (!fileId || !orgId || !userId || !newContent) {
       return NextResponse.json(
-        { error: "Missing required fields (fileId, orgId, newContent, userId)" },
+        {
+          error:
+            "Missing required fields (fileId, orgId, userId, newContent)",
+        },
         { status: 400 }
       );
     }
 
+    const tier = plan ?? "developer";
+
     // --------------------------------------------------
-    // 1. Developer tier — blocked from editing
+    // Developer — block editing
     // --------------------------------------------------
-    if (plan === "developer") {
+    if (tier === "developer") {
       return NextResponse.json(
         {
-          error: "Upgrade required to edit saved infrastructure files.",
+          error: "Upgrade required to edit infrastructure files.",
           upgrade_required: true,
         },
-        { status: 401 }
+        { status: 403 }
       );
     }
 
     // --------------------------------------------------
-    // 2. Supabase client (Service Role)
+    // Supabase admin client
     // --------------------------------------------------
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_URL!,               // internal secure URL
+      process.env.SUPABASE_SERVICE_ROLE_KEY!   // bypass RLS
     );
 
     // --------------------------------------------------
-    // 3. Get current file data
+    // Fetch current file and validate org ownership
     // --------------------------------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
@@ -67,42 +78,61 @@ export async function POST(req: Request) {
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or access denied" },
+        { error: "File not found or belongs to another organization." },
         { status: 404 }
       );
     }
 
-    const oldContent = file.content;
+    const oldContent = file.content ?? "";
 
     // --------------------------------------------------
-    // 4. Insert new version into file_version_history
+    // Insert version history entry
     // --------------------------------------------------
-    await supabase.from("file_version_history").insert({
-      file_id: fileId,
-      org_id: orgId,
-      previous_content: oldContent,
-      new_content: newContent,
-      change_summary: "Manual update via File Portal",
-    });
+    const { error: versionErr } = await supabase
+      .from("file_version_history")
+      .insert({
+        file_id: fileId,
+        org_id: orgId,
+        previous_content: oldContent,
+        new_content: newContent,
+        change_summary: "File updated through DevVelocity File Portal",
+        last_modified_by: userId,
+      });
+
+    if (versionErr) {
+      console.error("Version create error:", versionErr);
+      return NextResponse.json(
+        { error: "Failed to create version history entry." },
+        { status: 500 }
+      );
+    }
 
     // --------------------------------------------------
-    // 5. Update main file record
+    // Update main file record
     // --------------------------------------------------
-    await supabase
+    const { error: updateErr } = await supabase
       .from("files")
       .update({
         content: newContent,
-        last_modified_by: userId,
         updated_at: new Date().toISOString(),
+        last_modified_by: userId,
       })
       .eq("id", fileId);
 
+    if (updateErr) {
+      console.error("Update file error:", updateErr);
+      return NextResponse.json(
+        { error: "Failed to update main file record." },
+        { status: 500 }
+      );
+    }
+
     // --------------------------------------------------
-    // 6. Meter usage
+    // Meter usage: editing counts as a pipeline event
     // --------------------------------------------------
     await supabase.from("usage_logs").insert({
       org_id: orgId,
-      pipelines_run: 1,     // editing infra is treated as a pipeline event
+      pipelines_run: 1,
       provider_api_calls: 0,
       build_minutes: 0,
       date: new Date().toISOString(),
@@ -110,12 +140,14 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "File updated successfully",
+      message: "File updated successfully.",
     });
   } catch (err: any) {
     console.error("File update error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      {
+        error: err.message ?? "Internal server error",
+      },
       { status: 500 }
     );
   }
