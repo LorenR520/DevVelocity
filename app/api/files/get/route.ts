@@ -1,63 +1,40 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
 
-/**
- * GET A SINGLE FILE FOR DASHBOARD
- * ---------------------------------------
- * Returns:
- *  - file metadata
- *  - current content
- *  - version count
- *
- * Tier Rules:
- * - Developer → no access (returns 401 upgrade required)
- */
-
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   try {
-    const { fileId, orgId, plan } = await req.json();
+    const supabase = createClient();
 
-    if (!fileId || !orgId) {
-      return NextResponse.json(
-        { error: "Missing fileId or orgId" },
-        { status: 400 }
-      );
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json({ error: "Missing file ID" }, { status: 400 });
     }
 
-    // Developer tier blocked
-    if (plan === "developer") {
+    // ---------------------------
+    // 1. Ensure user is logged in
+    // ---------------------------
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr || !user) {
       return NextResponse.json(
-        {
-          error: "Upgrade required to view saved files.",
-          upgrade_required: true,
-        },
+        { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    // Supabase
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // Fetch file
+    // ---------------------------
+    // 2. Fetch file securely
+    // ---------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
-      .select(
-        `
-        id,
-        filename,
-        description,
-        content,
-        org_id,
-        created_at,
-        updated_at,
-        version_count: file_version_history(count)
-      `
-      )
-      .eq("id", fileId)
-      .eq("org_id", orgId)
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", user.id)
       .single();
 
     if (fileErr || !file) {
@@ -69,9 +46,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ file });
   } catch (err: any) {
-    console.error("Get file error:", err);
+    console.error("GET /api/files/get ERROR:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
