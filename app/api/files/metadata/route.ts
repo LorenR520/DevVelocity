@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * GET FILE METADATA
- * ---------------------------------------------------------
+ * FILE METADATA ENDPOINT
+ * -------------------------------------------------------------
  * POST /api/files/metadata
  *
  * Inputs:
@@ -14,15 +14,13 @@ import { createClient } from "@supabase/supabase-js";
  *  }
  *
  * Behavior:
- *  - Developer → ❌ no access to metadata
+ *  - Developer tier ❌ cannot view metadata for saved files
  *  - Startup / Team / Enterprise → full access
- *  - Confirms file belongs to org
  *  - Returns:
  *      - filename
  *      - description
- *      - created_at
- *      - updated_at
- *      - version_count
+ *      - version count
+ *      - created_at / updated_at
  *      - last_modified_by
  */
 
@@ -30,6 +28,9 @@ export async function POST(req: Request) {
   try {
     const { fileId, orgId, plan } = await req.json();
 
+    // ---------------------------------------------------------
+    // Validate
+    // ---------------------------------------------------------
     if (!fileId || !orgId) {
       return NextResponse.json(
         { error: "Missing fileId or orgId" },
@@ -38,20 +39,20 @@ export async function POST(req: Request) {
     }
 
     // ---------------------------------------------------------
-    // Developer Tier — BLOCKED
+    // Developer tier — BLOCKED
     // ---------------------------------------------------------
     if (plan === "developer") {
       return NextResponse.json(
         {
-          error: "Upgrade required to view file metadata.",
-          upgrade_required: true
+          error: "Upgrade required to access file metadata.",
+          upgrade_required: true,
         },
         { status: 403 }
       );
     }
 
     // ---------------------------------------------------------
-    // Supabase admin client
+    // Supabase Admin Client
     // ---------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
     );
 
     // ---------------------------------------------------------
-    // Fetch file + version count
+    // Load file metadata
     // ---------------------------------------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
         created_at,
         updated_at,
         last_modified_by,
-        version_history:file_version_history(count)
+        deleted_at
       `
       )
       .eq("id", fileId)
@@ -81,31 +82,34 @@ export async function POST(req: Request) {
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or access denied." },
+        { error: "File not found" },
         { status: 404 }
       );
     }
 
-    // Normalize count result
-    const versionCount = file.version_history?.[0]?.count ?? 0;
+    // ---------------------------------------------------------
+    // Version count
+    // ---------------------------------------------------------
+    const { count: versionCount } = await supabase
+      .from("file_version_history")
+      .select("*", { count: "exact", head: true })
+      .eq("file_id", fileId);
 
     return NextResponse.json({
-      success: true,
-      file: {
-        id: file.id,
-        filename: file.filename,
-        description: file.description,
-        created_at: file.created_at,
-        updated_at: file.updated_at,
-        last_modified_by: file.last_modified_by,
-        version_count: versionCount
-      }
+      id: file.id,
+      filename: file.filename,
+      description: file.description,
+      created_at: file.created_at,
+      updated_at: file.updated_at,
+      last_modified_by: file.last_modified_by,
+      deleted_at: file.deleted_at,
+      version_count: versionCount ?? 0,
     });
 
   } catch (err: any) {
     console.error("Metadata API error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Internal server error" },
+      { error: err.message ?? "Internal error" },
       { status: 500 }
     );
   }
