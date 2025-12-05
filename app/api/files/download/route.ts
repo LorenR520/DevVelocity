@@ -2,15 +2,22 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * DOWNLOAD FILE OR VERSION
- *
+ * DOWNLOAD FILE OR VERSION (PRODUCTION READY)
+ * --------------------------------------------------------
  * GET /api/files/download?id=123
  * GET /api/files/download?id=456&type=version
  *
- * Rules:
- * - Developer tier cannot download
- * - Must verify authenticated user belongs to file's org
- * - Supports version downloads via file_version_history
+ * Security:
+ *  - Enforces org isolation using RLS + org_id check
+ *  - Developer plan cannot download
+ *  - User must be authenticated & belong to an org
+ *
+ * Supports:
+ *  - Current file download
+ *  - Old version download
+ *
+ * Logs:
+ *  - Adds a download usage event for Startup+ tiers
  */
 
 export async function GET(req: Request) {
@@ -28,23 +35,24 @@ export async function GET(req: Request) {
       );
     }
 
-    // ------------------------------------------
-    // 1. Verify user is authenticated
-    // ------------------------------------------
+    // ----------------------------------------------------
+    // 1. Authentication check
+    // ----------------------------------------------------
     const {
       data: { user },
+      error: authErr,
     } = await supabase.auth.getUser();
 
-    if (!user) {
+    if (authErr || !user) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    // ------------------------------------------
-    // 2. Load user’s org + plan
-    // ------------------------------------------
+    // ----------------------------------------------------
+    // 2. Load user's org + plan
+    // ----------------------------------------------------
     const { data: profile } = await supabase
       .from("profiles")
       .select("org_id")
@@ -53,7 +61,7 @@ export async function GET(req: Request) {
 
     if (!profile?.org_id) {
       return NextResponse.json(
-        { error: "User not assigned to an organization" },
+        { error: "User is not assigned to an organization" },
         { status: 403 }
       );
     }
@@ -68,70 +76,81 @@ export async function GET(req: Request) {
 
     const plan = org?.plan_id ?? "developer";
 
-    // Developer tier cannot download files
+    // ----------------------------------------------------
+    // 3. Tier enforcement
+    // ----------------------------------------------------
     if (plan === "developer") {
       return NextResponse.json(
         {
           error: "Downloads are not available on the Developer plan.",
-          upgrade: true,
+          upgradeRequired: true,
           upgradeMessage:
-            "Upgrade to the Startup Tier to unlock file downloads.",
+            "Upgrade to Startup or above to unlock downloads.",
         },
         { status: 403 }
       );
     }
 
-    // ------------------------------------------
-    // 3. Fetch file or version safely with RLS
-    // ------------------------------------------
-    let record: any = null;
+    // ----------------------------------------------------
+    // 4. Fetch file OR version with strict org enforcement
+    // ----------------------------------------------------
+    let record: { filename: string; content: string | null } | null = null;
 
     if (type === "version") {
-      // Load version history entry
+      // Load specific version record
       const { data, error } = await supabase
         .from("file_version_history")
-        .select("*")
-        .eq("id", id)
-        .eq("org_id", orgId) // ensure ownership
-        .single();
-
-      if (error || !data) {
-        return NextResponse.json(
-          { error: "Version not found" },
-          { status: 404 }
-        );
-      }
-
-      record = {
-        filename: `version-${data.id}.txt`,
-        content: data.new_content,
-      };
-    } else {
-      // Load main file
-      const { data, error } = await supabase
-        .from("files")
-        .select("*")
+        .select("id, new_content, created_at")
         .eq("id", id)
         .eq("org_id", orgId)
         .single();
 
       if (error || !data) {
         return NextResponse.json(
-          { error: "File not found" },
+          { error: "Version not found or access denied" },
           { status: 404 }
         );
       }
 
       record = {
-        filename: data.filename,
-        content: data.content,
+        filename: `version-${data.id}-${data.created_at}.txt`.replace(/[: ]/g, "_"),
+        content: data.new_content ?? "",
+      };
+    } else {
+      // Load main file
+      const { data, error } = await supabase
+        .from("files")
+        .select("filename, content")
+        .eq("id", id)
+        .eq("org_id", orgId)
+        .single();
+
+      if (error || !data) {
+        return NextResponse.json(
+          { error: "File not found or access denied" },
+          { status: 404 }
+        );
+      }
+
+      record = {
+        filename: data.filename || "file.txt",
+        content: data.content ?? "",
       };
     }
 
-    // ------------------------------------------
-    // 4. Serve file content for download
-    // ------------------------------------------
-    return new Response(record.content ?? "", {
+    // ----------------------------------------------------
+    // 5. Log download usage
+    // ----------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      downloads: 1,
+      date: new Date().toISOString(),
+    });
+
+    // ----------------------------------------------------
+    // 6. Return downloadable file
+    // ----------------------------------------------------
+    return new Response(record.content, {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
@@ -141,7 +160,7 @@ export async function GET(req: Request) {
   } catch (err: any) {
     console.error("Download API error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: err?.message ?? "Internal server error" },
       { status: 500 }
     );
   }
