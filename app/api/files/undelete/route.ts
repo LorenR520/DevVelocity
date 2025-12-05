@@ -1,10 +1,13 @@
+// app/api/files/undelete/route.ts
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * UNDELETE FILE (Restore Soft Delete)
- * ---------------------------------------------------------------
- * Inputs:
+ * UNDELETE FILE (Restore soft-deleted file)
+ * ------------------------------------------------------------
+ *
+ * Required Inputs:
  *  {
  *    fileId: string,
  *    orgId: string,
@@ -13,17 +16,18 @@ import { createClient } from "@supabase/supabase-js";
  *  }
  *
  * Behavior:
- *  - Developer tier ❌ cannot restore files
- *  - Startup / Team / Enterprise → allowed
- *  - Restores soft-deleted file (sets deleted_at = null)
- *  - Preserves version history
- *  - Logs usage
+ *  - Developer → ❌ No undelete
+ *  - Startup / Team / Enterprise → Restore allowed
+ *  - Ensures file belongs to org
+ *  - Clears deleted_at timestamp
+ *  - Logs action & creates version entry
  */
 
 export async function POST(req: Request) {
   try {
     const { fileId, orgId, plan, userId } = await req.json();
 
+    // Validate required inputs
     if (!fileId || !orgId || !userId) {
       return NextResponse.json(
         { error: "Missing fileId, orgId, or userId" },
@@ -31,9 +35,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---------------------------------------------------
-    // 1. Developer tier → blocked
-    // ---------------------------------------------------
+    // Developer tier → cannot restore files
     if (plan === "developer") {
       return NextResponse.json(
         {
@@ -44,17 +46,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---------------------------------------------------
-    // 2. Supabase service-role client
-    // ---------------------------------------------------
+    // Supabase admin client
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ---------------------------------------------------
-    // 3. Verify file exists + belongs to org
-    // ---------------------------------------------------
+    // Fetch target file
     const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
@@ -64,22 +62,19 @@ export async function POST(req: Request) {
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found or access denied" },
+        { error: "File not found or belongs to another organization" },
         { status: 404 }
       );
     }
 
-    // Check if file is deleted
-    if (!file.deleted_at) {
+    if (file.deleted_at === null) {
       return NextResponse.json(
         { error: "File is not deleted" },
         { status: 400 }
       );
     }
 
-    // ---------------------------------------------------
-    // 4. Restore file
-    // ---------------------------------------------------
+    // Restore the file
     const { error: restoreErr } = await supabase
       .from("files")
       .update({
@@ -87,8 +82,7 @@ export async function POST(req: Request) {
         updated_at: new Date().toISOString(),
         last_modified_by: userId,
       })
-      .eq("id", fileId)
-      .eq("org_id", orgId);
+      .eq("id", fileId);
 
     if (restoreErr) {
       return NextResponse.json(
@@ -97,21 +91,17 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---------------------------------------------------
-    // 5. Log restoration in version history
-    // ---------------------------------------------------
+    // Log undelete event in version history
     await supabase.from("file_version_history").insert({
       file_id: fileId,
       org_id: orgId,
       previous_content: null,
       new_content: null,
-      change_summary: "File restored from trash",
+      change_summary: "File restored from deleted state",
       last_modified_by: userId,
     });
 
-    // ---------------------------------------------------
-    // 6. Log usage (non-billable)
-    // ---------------------------------------------------
+    // Usage logs
     await supabase.from("usage_logs").insert({
       org_id: orgId,
       pipelines_run: 0,
@@ -123,10 +113,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "File restored successfully",
+      message: "File successfully restored.",
     });
   } catch (err: any) {
-    console.error("Undelete file error:", err);
+    console.error("Undelete route error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
