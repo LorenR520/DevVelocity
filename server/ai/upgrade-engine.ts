@@ -1,122 +1,117 @@
 /**
- * DevVelocity — Upgrade Engine
+ * DevVelocity — AI Upgrade Engine
  * -----------------------------------------------------------
- * Evaluates whether an AI-generated architecture exceeds the
- * user's plan based on:
- *  - Number of cloud providers
- *  - Infrastructure complexity
- *  - Multi-cloud features
- *  - Enterprise-only components
+ * Evaluates AI Builder output and determines:
+ *  - whether current plan supports generated architecture
+ *  - if upgrade is required
+ *  - recommended tier
+ *  - warnings for over-limit usage
+ *
+ * Works with new paid Developer tier (no free plans).
  */
 
 import { getPlan } from "@/ai-builder/plan-logic";
 
 export class UpgradeEngine {
   /**
-   * Evaluate whether the AI result exceeds the allowed features
-   * for the user's tier.
+   * Main evaluation method
    */
   static async evaluate(aiOutput: any, planId: string) {
     const plan = getPlan(planId);
 
     if (!plan) {
       return {
-        needsUpgrade: false,
-        message: "Invalid plan tier",
+        needsUpgrade: true,
+        message: "Invalid plan tier.",
+        recommendedPlan: "startup",
       };
     }
 
-    // Defensive default
-    if (!aiOutput || typeof aiOutput !== "object") {
-      return {
-        needsUpgrade: false,
-      };
+    // Nothing to evaluate
+    if (!aiOutput) {
+      return { needsUpgrade: false };
     }
 
-    const usedProviders = Array.isArray(aiOutput.providers)
-      ? aiOutput.providers.length
-      : 1;
+    // -------------------------------------------------------
+    // Extract architecture metadata
+    // -------------------------------------------------------
+    const providersUsed = aiOutput.providers?.length ?? 0;
+    const pipelinesUsed = aiOutput.pipelines?.length ?? 0;
+    const featuresUsed = aiOutput.features?.length ?? 0;
 
-    // -----------------------------------------------------------
-    // Rule 1: Provider Limit Check
-    // -----------------------------------------------------------
-    if (
-      plan.providers !== "unlimited" &&
-      usedProviders > Number(plan.providers)
-    ) {
-      const nextPlan = UpgradeEngine.nextPlan(planId);
+    // -------------------------------------------------------
+    // Compare to plan capabilities
+    // -------------------------------------------------------
+    const providerLimit = plan.providers === "unlimited" ? Infinity : plan.providers;
+    const pipelineLimit = plan.limits?.pipelines ?? Infinity;
+    const featureLimit = plan.limits?.api_calls ?? Infinity; // loosely approximate
 
+    // -------------------------------------------------------
+    // Provider Limit
+    // -------------------------------------------------------
+    if (providersUsed > providerLimit) {
+      const recommended = UpgradeEngine.recommendPlan(providersUsed);
       return {
         needsUpgrade: true,
-        recommendedPlan: nextPlan,
-        message: `Your architecture uses ${usedProviders} providers, which exceeds your ${planId} tier limit.`,
+        recommendedPlan: recommended,
+        message: `This architecture requires ${providersUsed} cloud providers, but your plan supports only ${providerLimit}. Upgrade to ${recommended}.`,
       };
     }
 
-    // -----------------------------------------------------------
-    // Rule 2: Feature Capability Check
-    // -----------------------------------------------------------
-    const requiresEnterpriseFeatures =
-      aiOutput.features?.includes("multi-cloud-failover") ||
-      aiOutput.features?.includes("global-route-failover") ||
-      aiOutput.features?.includes("ai_autoscale") ||
-      aiOutput.features?.includes("zero_downtime_deployments");
-
-    if (requiresEnterpriseFeatures && planId !== "enterprise") {
+    // -------------------------------------------------------
+    // Pipeline Limit
+    // -------------------------------------------------------
+    if (pipelinesUsed > pipelineLimit) {
+      const recommended = UpgradeEngine.recommendPlan(pipelinesUsed);
       return {
         needsUpgrade: true,
-        recommendedPlan: "enterprise",
-        message:
-          "This architecture includes enterprise-only resiliency and scaling features. Upgrade required.",
+        recommendedPlan: recommended,
+        message: `Your architecture contains ${pipelinesUsed} CI/CD pipelines, exceeding your current plan’s limit of ${pipelineLimit}.`,
       };
     }
 
-    // -----------------------------------------------------------
-    // Rule 3: Complexity Check (pipeline + microservice count)
-    // -----------------------------------------------------------
-    const serviceCount = aiOutput.services?.length ?? 1;
-
-    if (serviceCount > 10 && planId === "developer") {
+    // -------------------------------------------------------
+    // Feature complexity (soft check)
+    // -------------------------------------------------------
+    if (planId === "developer" && featuresUsed > 30) {
       return {
         needsUpgrade: true,
         recommendedPlan: "startup",
         message:
-          "Developer tier limited to small builds. Generated architecture exceeds service complexity.",
+          "This architecture is too complex for the Developer tier. Upgrade to unlock advanced automation and multi-provider features.",
       };
     }
 
-    if (serviceCount > 25 && planId === "startup") {
+    if (planId === "startup" && featuresUsed > 75) {
       return {
         needsUpgrade: true,
         recommendedPlan: "team",
         message:
-          "Startup tier exceeded. Upgrade to Team for medium-sized architectures.",
+          "Your architecture contains enterprise-level features exceeding Startup tier thresholds.",
       };
     }
 
-    // -----------------------------------------------------------
-    // All tests passed = no upgrade required
-    // -----------------------------------------------------------
+    // -------------------------------------------------------
+    // Enterprise = always allowed
+    // -------------------------------------------------------
+    if (planId === "enterprise") {
+      return { needsUpgrade: false };
+    }
+
+    // -------------------------------------------------------
+    // Allowed
+    // -------------------------------------------------------
     return {
       needsUpgrade: false,
-      message: null,
     };
   }
 
   /**
-   * Determine next upgrade path in order:
-   * developer → startup → team → enterprise
+   * Picks the recommended plan for the architecture
    */
-  static nextPlan(current: string) {
-    switch (current) {
-      case "developer":
-        return "startup";
-      case "startup":
-        return "team";
-      case "team":
-        return "enterprise";
-      default:
-        return "enterprise";
-    }
+  static recommendPlan(requiredProviders: number): string {
+    if (requiredProviders <= 3) return "startup";
+    if (requiredProviders <= 7) return "team";
+    return "enterprise";
   }
 }
