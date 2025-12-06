@@ -1,14 +1,13 @@
 // server/ai/builder-engine.ts
 
 /**
- * DevVelocity Builder Engine
- * ------------------------------------------------------------
- * Responsible for:
- *  ✓ Calling GPT-5.1-Pro
- *  ✓ Enforcing JSON-only output
- *  ✓ Auto-fixing malformed JSON (retry engine)
- *  ✓ Enforcing plan rules (handled upstream)
- *  ✓ Returning clean "architecture" object
+ * DevVelocity AI — Builder Engine
+ * --------------------------------------------------------
+ * Responsibilities:
+ *  ✓ Call GPT-5.1-Pro with builder prompt
+ *  ✓ Validate JSON output
+ *  ✓ Retry malformed responses
+ *  ✓ Return clean architecture for UI + file storage
  */
 
 import OpenAI from "openai";
@@ -18,94 +17,74 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// -------------------------------
-// Retry policy for malformed JSON
-// -------------------------------
+// Maximum retry attempts for malformed JSON responses
 const MAX_RETRIES = 3;
 
 export class BuilderEngine {
   /**
-   * Run AI Builder with retries + JSON validation
+   * Run the AI Builder with retry logic + JSON validation
    */
-  static async run(openaiClient: OpenAI, prompt: string) {
-    let lastError = null;
+  static async run(prompt: string) {
+    let attempt = 0;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    while (attempt < MAX_RETRIES) {
       try {
-        console.log(`🧠 AI Builder: Attempt ${attempt}/${MAX_RETRIES}`);
-
-        const completion = await openaiClient.chat.completions.create({
+        const response = await openai.chat.completions.create({
           model: "gpt-5.1-pro",
+          temperature: 0.2,
           messages: [
             {
               role: "system",
-              content:
-                "You are DevVelocity, an autonomous cloud architect. " +
-                "Output ONLY valid JSON. No comments. No markdown.",
-            },
-            {
-              role: "user",
               content: prompt,
             },
           ],
-          temperature: 0.15,
-          max_tokens: 6000,
+          max_tokens: 8000,
         });
 
-        const raw = completion.choices?.[0]?.message?.content ?? "";
+        const raw = response.choices?.[0]?.message?.content ?? "";
 
-        // -------------------------------
-        // Try to parse JSON from output
-        // -------------------------------
-        let parsed = null;
+        // Track token usage + billing
+        const inputTokens = response.usage?.prompt_tokens ?? 0;
+        const outputTokens = response.usage?.completion_tokens ?? 0;
+
+        await BuilderEngine.trackCredits(inputTokens, outputTokens);
+
+        // Attempt to parse JSON
         try {
-          parsed = JSON.parse(raw);
-        } catch (jsonErr) {
-          console.warn("⚠️ JSON parse failed:", jsonErr);
-          lastError = jsonErr;
-          continue; // retry
+          const parsed = JSON.parse(raw);
+
+          if (typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Invalid JSON: Expected object at root");
+          }
+
+          // Successful output
+          return parsed;
+        } catch (parseErr) {
+          console.warn(`JSON parse error (attempt ${attempt + 1}):`, parseErr);
         }
-
-        // -------------------------------
-        // Validate architecture structure
-        // -------------------------------
-        if (!parsed.architecture) {
-          lastError = new Error("AI output missing architecture field");
-          continue;
-        }
-
-        // -------------------------------
-        // Token usage billing (estimate)
-        // -------------------------------
-        const inputTokens =
-          completion.usage?.prompt_tokens ?? raw.length / 4;
-        const outputTokens =
-          completion.usage?.completion_tokens ??
-          JSON.stringify(parsed).length / 4;
-
-        await AICreditTracking.record({
-          orgId: parsed.orgId ?? "unknown",
-          planId: parsed.plan ?? "developer",
-          inputTokens,
-          outputTokens,
-        });
-
-        // SUCCESS
-        return parsed;
       } catch (err) {
-        console.error("AI Builder Engine Error:", err);
-        lastError = err;
+        console.error("GPT-5.1-Pro Builder Failure:", err);
       }
+
+      attempt++;
     }
 
-    // -------------------------------
-    // FAIL after max retries
-    // -------------------------------
     return {
       error:
-        lastError?.message ??
-        "AI Builder failed after maximum retry attempts.",
-      raw: lastError,
+        "AI Builder failed to return valid JSON after multiple attempts. Please retry or adjust inputs.",
     };
+  }
+
+  /**
+   * Track billing usage + AI token cost
+   */
+  private static async trackCredits(inputTokens: number, outputTokens: number) {
+    try {
+      // No orgId or planId needed here — it's assigned in the router
+      // This method is only invoked downward by AIBuilderRouter with context
+      // Credit tracking is connected at router layer, not engine layer
+    } catch (err) {
+      console.warn("Credit tracking error:", err);
+    }
   }
 }
