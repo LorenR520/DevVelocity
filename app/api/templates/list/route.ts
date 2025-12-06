@@ -1,118 +1,95 @@
-// app/api/templates/list/route.ts
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * LIST TEMPLATES AVAILABLE TO THE ORG
- * -------------------------------------------------------------
- * Visibility Rules:
- *  - Developer tier ❌ cannot use templates
- *  - Startup / Team / Enterprise → full access
+ * LIST TEMPLATES
+ * --------------------------------------------------------
+ * Inputs:
+ *  {
+ *    orgId: string,
+ *    plan: string
+ *  }
  *
- * Template Types Supported:
- *  - Private templates (owned by org)
- *  - Public templates (future marketplace support)
+ * Behavior:
+ *  - Developer → access only free/default templates
+ *  - Startup   → access extended templates
+ *  - Team      → access advanced provider templates
+ *  - Enterprise → access all + private templates
  *
- * Response Includes:
- *  - template id
- *  - name
- *  - description
- *  - created_at
- *  - updated_at
- *  - version_count
+ *  Template Categories:
+ *   - base (always allowed)
+ *   - provider (AWS, Azure, GCP, Cloudflare, Supabase…)
+ *   - advanced (multi-cloud, ai-infra, pipelines)
+ *   - enterprise (private, SOC2-ready, compliance)
  */
 
 export async function POST(req: Request) {
   try {
     const { orgId, plan } = await req.json();
 
-    if (!orgId) {
+    if (!orgId || !plan) {
       return NextResponse.json(
-        { error: "Missing orgId" },
+        { error: "Missing orgId or plan" },
         { status: 400 }
       );
     }
 
-    // -------------------------------------------------------------
-    // 1. Developer plan → BLOCKED
-    // -------------------------------------------------------------
-    if (plan === "developer") {
-      return NextResponse.json(
-        {
-          templates: [],
-          message: "Upgrade required to access deployment templates.",
-          upgrade_required: true,
-        },
-        { status: 403 }
-      );
-    }
-
-    // -------------------------------------------------------------
-    // 2. Supabase (service role)
-    // -------------------------------------------------------------
+    // --------------------------------------------------------
+    // Supabase Admin Client
+    // --------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // -------------------------------------------------------------
-    // 3. Fetch templates belonging to org
-    // -------------------------------------------------------------
-    const { data: templates, error: templateErr } = await supabase
+    // --------------------------------------------------------
+    // Build template access rules
+    // --------------------------------------------------------
+    const accessLevels = {
+      developer: ["base"], // minimal
+      startup: ["base", "provider"],
+      team: ["base", "provider", "advanced"],
+      enterprise: ["base", "provider", "advanced", "enterprise"],
+    };
+
+    const allowedCategories =
+      accessLevels[plan as keyof typeof accessLevels] ??
+      ["base"];
+
+    // --------------------------------------------------------
+    // Fetch templates by allowed category list
+    // --------------------------------------------------------
+    const { data: templates, error } = await supabase
       .from("templates")
       .select(
         `
         id,
-        org_id,
         name,
+        category,
         description,
-        created_at,
-        updated_at,
-        type
+        provider,
+        updated_at
       `
       )
-      .eq("org_id", orgId)
-      .order("created_at", { ascending: false });
+      .in("category", allowedCategories)
+      .order("updated_at", { ascending: false });
 
-    if (templateErr) {
-      console.error("Template list error:", templateErr);
+    if (error) {
+      console.error("Template fetch error:", error);
       return NextResponse.json(
         { error: "Failed to load templates" },
         { status: 500 }
       );
     }
 
-    // -------------------------------------------------------------
-    // 4. Fetch version count for each template
-    // -------------------------------------------------------------
-    const templateIds = templates.map((t) => t.id);
-
-    let versionCounts: Record<string, number> = {};
-
-    if (templateIds.length > 0) {
-      const { data: versionRows } = await supabase
-        .from("template_version_history")
-        .select("template_id, id");
-
-      versionRows?.forEach((v) => {
-        versionCounts[v.template_id] =
-          (versionCounts[v.template_id] || 0) + 1;
-      });
-    }
-
-    // Attach version_count to each template
-    const enriched = templates.map((t) => ({
-      ...t,
-      version_count: versionCounts[t.id] ?? 0,
-    }));
-
     return NextResponse.json({
-      orgId,
-      templates: enriched,
+      success: true,
+      plan,
+      allowed_categories: allowedCategories,
+      templates: templates ?? [],
     });
   } catch (err: any) {
-    console.error("Template-list API error:", err);
+    console.error("Template list API error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
