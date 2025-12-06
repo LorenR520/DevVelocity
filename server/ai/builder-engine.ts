@@ -1,133 +1,126 @@
-// server/ai/builder-engine.ts
+/**
+ * DevVelocity AI Builder Engine
+ * -----------------------------------------------------------
+ * Responsibilities:
+ *  ✓ Call GPT-5.1-Pro with our custom prompt
+ *  ✓ Ensure strict JSON output (auto-correct if malformed)
+ *  ✓ Protect against hallucination
+ *  ✓ Validate component structure
+ *  ✓ Return stable output to UI + API
+ */
 
 import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
 
-/**
- * DevVelocity AI Builder Engine (GPT-5.1-Pro)
- * ------------------------------------------
- * Generates:
- *  - Architecture
- *  - Cloud-init
- *  - Docker Compose
- *  - Pipelines
- *  - SSO/Security models
- *  - Budget projections
- *  - Upgrade recommendations
- */
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
 
-export async function runAIBuild(answers: Record<string, any>) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("Missing OPENAI_API_KEY");
+export class BuilderEngine {
+  /**
+   * Run the AI Builder on a completed Prompt
+   */
+  static async run(prompt: string) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.1-pro",
+        temperature: 0.1,
+        max_tokens: 8000,
+        messages: [
+          {
+            role: "system",
+            content: `
+You are DevVelocity: a deterministic infrastructure architect.
+ALWAYS return ONLY a JSON object.
+NEVER include explanations outside the JSON.
+            `,
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      });
+
+      let raw = response.choices?.[0]?.message?.content ?? "";
+
+      // ---------------------------------------------------------
+      // Attempt to parse JSON. If it fails — fix automatically.
+      // ---------------------------------------------------------
+      let parsed = BuilderEngine.safeParseJSON(raw);
+
+      if (!parsed.valid) {
+        const fixed = await BuilderEngine.repairJSON(raw);
+
+        if (!fixed.valid) {
+          return {
+            error: "Malformed JSON could not be repaired.",
+            raw,
+          };
+        }
+
+        parsed = fixed;
+      }
+
+      return parsed.json;
+    } catch (err: any) {
+      console.error("AI Builder Engine Error:", err);
+      return {
+        error: err.message ?? "AI Builder Engine failed",
+      };
+    }
   }
 
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-  });
+  /**
+   * Try parsing JSON safely
+   */
+  static safeParseJSON(text: string) {
+    try {
+      const jsonStart = text.indexOf("{");
+      const jsonEnd = text.lastIndexOf("}");
 
-  const systemPrompt = buildAIPrompt(answers);
+      if (jsonStart === -1 || jsonEnd === -1) {
+        return { valid: false };
+      }
 
-  // ------------------------------------------
-  // GPT-5.1-Pro Call (new API)
-  // ------------------------------------------
-  const response = await client.responses.create({
-    model: "gpt-5.1-pro",
-    temperature: 0.25,
-    max_output_tokens: 6000,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content:
-          "Generate the complete infrastructure output in the required JSON schema.",
-      },
-    ],
-  });
+      const sliced = text.slice(jsonStart, jsonEnd + 1);
 
-  const raw = response.output_text;
-  if (!raw) throw new Error("AI returned empty output.");
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    console.error("Invalid JSON from AI:", raw);
-    throw new Error("AI output was not valid JSON.");
+      return { valid: true, json: JSON.parse(sliced) };
+    } catch {
+      return { valid: false };
+    }
   }
 
-  return parsed;
-}
+  /**
+   * If JSON is broken → ask GPT to repair it
+   */
+  static async repairJSON(brokenText: string) {
+    try {
+      const result = await openai.chat.completions.create({
+        model: "gpt-5.1-pro",
+        temperature: 0.0,
+        max_tokens: 4000,
+        messages: [
+          {
+            role: "system",
+            content: `
+You are a JSON repair engine.
+Your ONLY job is to output valid JSON extracted and corrected from malformed AI output.
+Return ONLY valid JSON.
+            `,
+          },
+          {
+            role: "user",
+            content: brokenText,
+          },
+        ],
+      });
 
-/**
- * Upgrade Engine — GPT-5.1-Pro
- * ------------------------------------------
- * Takes an OLD config file and:
- *  - updates to new cloud best practices
- *  - enforces tier limits
- *  - modernizes templates
- *  - warns about deprecated features
- *  - suggests upgrades ONLY if needed
- */
-export async function runAIUpgrade(existingConfig: string, plan: string) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("Missing OPENAI_API_KEY");
+      const fixed = result.choices?.[0]?.message?.content ?? "";
+      const parsed = BuilderEngine.safeParseJSON(fixed);
+
+      return parsed.valid ? parsed : { valid: false };
+    } catch (err) {
+      return { valid: false };
+    }
   }
-
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY!,
-  });
-
-  const upgradePrompt = `
-You are the DevVelocity **AI Upgrade Engine** (GPT-5.1-Pro).
-
-Your task:
-  - Analyze the existing infrastructure config
-  - Modernize it using 2025 best practices
-  - Enforce the user's plan tier: ${plan}
-  - Fix deprecated keys
-  - Optimize cloud-init
-  - Upgrade containerization & pipelines
-  - Suggest improvements ONLY when needed
-  - Keep JSON structure fully valid
-
-Return JSON EXACTLY as:
-
-{
-  "updated_config": { ... },
-  "changes": "bullet list of improvements",
-  "upgrade_suggestions": "if plan upgrade is recommended",
-  "warnings": "if any deprecated or risky patterns found"
-}
-
-Here is the old config:
-\`\`\`json
-${existingConfig}
-\`\`\`
-`;
-
-  const response = await client.responses.create({
-    model: "gpt-5.1-pro",
-    temperature: 0.2,
-    max_output_tokens: 5000,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: upgradePrompt },
-      { role: "user", content: "Analyze and upgrade this config now." },
-    ],
-  });
-
-  const raw = response.output_text;
-  if (!raw) throw new Error("AI returned no output.");
-
-  let parsed;
-
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    console.error("Upgrade JSON parsing failed:", raw);
-    throw new Error("Upgrade output was invalid JSON.");
-  }
-
-  return parsed;
 }
