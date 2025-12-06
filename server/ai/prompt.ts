@@ -1,20 +1,31 @@
 // server/ai/prompt.ts
 
 /**
- * DevVelocity AI Prompt Generator
+ * DevVelocity AI Prompt Engine
  * ----------------------------------------------------------
- * Builds all AI instructions dynamically:
- *  ✓ Plan-aware limits
- *  ✓ Provider constraints
- *  ✓ Experience-based simplification
- *  ✓ Environment logic (prod/dev/test)
- *  ✓ Region hints
- *  ✓ Auto-documentation ingestion from scraper
- *  ✓ Ensures output is ALWAYS valid JSON (critical)
+ * Generates:
+ *  ✓ Builder prompt (new infrastructure generation)
+ *  ✓ Upgrade prompt (fix + modernize existing files)
+ * 
+ * Tier-aware:
+ *  - Limits outputs based on plan tier
+ *  - Ensures AI respects pricing.json capabilities
  */
 
-import { getPlan } from "@/ai-builder/plan-logic";
+import pricingData from "@/marketing/pricing.json";
 
+/**
+ * Get plan details from pricing.json
+ */
+function getPlanInfo(planId: string) {
+  return pricingData.plans.find((p) => p.id === planId) ?? null;
+}
+
+/**
+ * ----------------------------------------------------------
+ * BUILDER PROMPT — generate brand new multi-cloud architectures
+ * ----------------------------------------------------------
+ */
 export function buildAIPrompt(answers: any) {
   const {
     provider,
@@ -22,126 +33,99 @@ export function buildAIPrompt(answers: any) {
     experience,
     environment,
     region,
-    features,
-    scrapedDocs,
+    features = [],
     plan = "developer",
   } = answers;
 
-  const planData = getPlan(plan);
+  const planInfo = getPlanInfo(plan);
 
-  // -------------------------
-  // EXPERIENCE LEVEL
-  // -------------------------
-  const experienceInstruction =
-    experience === "beginner"
-      ? "Use simple patterns and avoid advanced abstractions. Provide brief explanations."
-      : experience === "intermediate"
-      ? "Use balanced complexity. Avoid unnecessary abstractions."
-      : "Use professional-grade architecture with optimizations.";
+  const allowedProviders =
+    typeof planInfo.providers === "number"
+      ? planInfo.providers
+      : "unlimited";
 
-  // -------------------------
-  // ENVIRONMENT
-  // -------------------------
-  const envHint = environment
-    ? `The target environment is **${environment}**. Adjust settings accordingly (e.g., dev speeds up, prod is hardened).`
-    : "";
-
-  // -------------------------
-  // REGION
-  // -------------------------
-  const regionHint = region
-    ? `Target region: **${region}**.`
-    : "";
-
-  // -------------------------
-  // SCRAPED DOCUMENTATION
-  // (from cron provider ingest engine)
-  // -------------------------
-  const docHint = scrapedDocs
-    ? `Here is live documentation for the requested provider(s). Use these as primary references:\n${scrapedDocs}`
-    : "No scraped documentation provided.";
-
-  // -------------------------
-  // FEATURE FLAGS
-  // -------------------------
-  const featureHint = features && features.length > 0
-    ? `Requested features: ${features.join(", ")}.`
-    : "No extra features requested.";
-
-  // -------------------------
-  // PLAN LIMITS
-  // (Drives upgrade engine and output gating)
-  // -------------------------
-  const planConstraints = `
-The user's current plan is **${planData.name}**.
-
-Plan Constraints:
-- Max providers allowed: ${planData.providers}
-- Auto-update frequency: ${planData.updates}
-- Builder capability: ${planData.builder}
-- SSO: ${planData.sso}
-- Compliance level: ${planData.automation.compliance}
-- Scaling type: ${planData.automation.scaling}
-- CI/CD automation: ${planData.automation.ci_cd}
-
-Do NOT produce architecture that violates these plan limits.
-If the request naturally requires higher-tier features, still describe them, but label them as:
-"requires_upgrade": true
-and specify which tier is required.
-`;
-
-  // -------------------------
-  // FINAL PROMPT
-  // (Strict JSON output)
-  // -------------------------
   return `
-You are the DevVelocity Autonomous Infrastructure Builder.
+You are DevVelocity, an autonomous infrastructure architect.
 
-Your job is to generate a COMPLETE cloud architecture JSON object that follows the user's plan rules, desired provider, experience level, and requested features.
+Your task:
+Generate a complete infrastructure plan based on the user’s answers.
 
-${experienceInstruction}
-${envHint}
-${regionHint}
-${featureHint}
+User Inputs:
+- Provider: ${provider}
+- Budget: ${budget}
+- Experience: ${experience}
+- Environment: ${environment}
+- Region: ${region}
+- Features: ${features.join(", ") || "none"}
+- Plan Tier: ${plan}
+- Allowed Providers: ${allowedProviders}
 
-${planConstraints}
+Business Rules:
+1. NEVER exceed the user's plan tier.
+2. Provider count MUST NOT exceed: ${allowedProviders}
+3. Forbidden features for this tier:
+   - If tier = developer → no autoscaling, no enterprise SSO, no multi-cloud failover
+   - If tier = startup → no enterprise SSO, no private builders
+   - If tier = team → cannot use enterprise-only compliance or SCIM
+4. Your output must ALWAYS include:
+   {
+     "architecture": {
+       "providers": {
+         "aws" | "azure" | "gcp" | "cloudflare" | ...
+       },
+       "features": [],
+       "services": { ... }
+     },
+     "estimated_build_minutes": number,
+     "estimated_api_calls": number,
+     "estimated_pipelines": number
+   }
 
-${docHint}
+5. Your output MUST be valid JSON. No commentary.
 
-Your output MUST be valid JSON and follow exactly this shape:
+6. Output ONLY the JSON — no extra explanations.
 
-{
-  "architecture": {
-    "provider": "string",
-    "resources": [...],
-    "networking": {...},
-    "security": {...},
-    "scaling": "none | rules | autoscale | ai_autoscale",
-    "compliance": "none | basic | enhanced | enterprise",
-    "features": ["multi_cloud_failover", "zero_downtime_deployments", ...],
-    "estimatedBuildMinutes": number
-  }
+Begin now.
+  `;
 }
 
+/**
+ * ----------------------------------------------------------
+ * UPGRADE PROMPT — clean, modernize, and fix old architecture
+ * ----------------------------------------------------------
+ */
+export function buildUpgradePrompt(oldFile: any, plan: string) {
+  const planInfo = getPlanInfo(plan);
+
+  const allowedProviders =
+    typeof planInfo.providers === "number"
+      ? planInfo.providers
+      : "unlimited";
+
+  return `
+You are DevVelocity AI — the autonomous upgrade engine.
+
+Your task:
+Upgrade, repair, normalize, and modernize the user's architecture file.
+
+Plan Tier: ${plan}
+Allowed Providers: ${allowedProviders}
+
 Rules:
-1. **No markdown**, no text outside JSON.
-2. Include estimated build minutes based on complexity.
-3. Apply plan limits.
-4. Use scraped documentation provided above.
-5. If user request exceeds limits, set:
-   "requires_upgrade": true
-   "upgrade_needed_for": "team | enterprise | startup"
-6. Never hallucinate APIs — only use real, scraped docs.
+1. DO NOT add features beyond the plan tier.
+2. DO NOT introduce multi-cloud if not allowed.
+3. DO NOT enable autoscaling unless the plan includes it.
+4. Remove any deprecated fields.
+5. Ensure compatibility with DevVelocity's 2025 JSON schema.
 
-Now generate the JSON architecture for the following request:
+User File to Upgrade:
+${JSON.stringify(oldFile, null, 2)}
 
-Provider: ${provider}
-Budget: ${budget}
-User Experience: ${experience}
-Environment: ${environment}
-Region: ${region}
-Features: ${JSON.stringify(features ?? [])}
+Output Format:
+{
+  "upgraded": { ...clean JSON... }
+}
 
-Return ONLY the JSON object.
+The output MUST be strictly valid JSON with no extra text.
   `;
 }
