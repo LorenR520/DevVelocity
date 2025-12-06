@@ -5,132 +5,154 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * BILLING LIMITS API
- * -------------------------------------------------------
- * POST /api/billing/limits
- *
- * Inputs:
- *  {
- *    orgId: string,
- *    plan: string
- *  }
- *
+ * ------------------------------------------------------------
  * Returns:
- *  {
- *    allowed: boolean,
- *    upgrade_required: boolean,
- *    usage: { ... },
- *    limits: { ... },
- *    message?: string
- *  }
+ *  - plan information
+ *  - usage remaining
+ *  - hard limits
+ *  - upgrade flags
  *
  * Used by:
- *  - AI Builder execution
- *  - File creation
- *  - File download
- *  - Version restore
- *  - Regeneration pipeline
+ *  - Dashboard (top banner)
+ *  - AI builder upgrade gates
+ *  - File Portal access control
+ *  - Usage graph + cycle bars
+ *
+ * Logic:
+ *  - Developer → restricted, minimal limits
+ *  - Startup   → basic limits
+ *  - Team      → higher limits
+ *  - Enterprise→ unlimited mode
  */
 
 export async function POST(req: Request) {
   try {
-    const { orgId, plan } = await req.json();
+    const { orgId } = await req.json();
 
-    if (!orgId || !plan) {
+    if (!orgId) {
       return NextResponse.json(
-        { error: "Missing orgId or plan" },
+        { error: "Missing orgId" },
         { status: 400 }
       );
     }
 
-    // -------------------------------------------------------
-    // 1. Define plan-specific limits  
-    // -------------------------------------------------------
-    const PLAN_LIMITS: any = {
-      developer: {
-        pipelines: 5,
-        provider_calls: 50,
-        build_minutes: 15,
-      },
-      startup: {
-        pipelines: 200,
-        provider_calls: 2000,
-        build_minutes: 500,
-      },
-      team: {
-        pipelines: 1000,
-        provider_calls: 8000,
-        build_minutes: 2500,
-      },
-      enterprise: {
-        pipelines: Infinity,
-        provider_calls: Infinity,
-        build_minutes: Infinity,
-      },
-    };
-
-    const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS["developer"];
-
-    // -------------------------------------------------------
-    // 2. Fetch usage for the current billing month
-    // -------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // ------------------------------------------------------------
+    // 1. Load org billing details
+    // ------------------------------------------------------------
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("plan_id, cycle_start, cycle_end")
+      .eq("id", orgId)
+      .single();
 
-    const { data: usageRows, error: usageErr } = await supabase
-      .from("usage_logs")
-      .select("*")
-      .eq("org_id", orgId)
-      .gte("date", startOfMonth.toISOString());
-
-    if (usageErr) {
-      console.error("Usage fetch error:", usageErr);
+    if (orgErr || !org) {
       return NextResponse.json(
-        { error: "Could not load usage data" },
-        { status: 500 }
+        { error: "Organization not found" },
+        { status: 404 }
       );
     }
 
+    const plan = org.plan_id ?? "developer";
+
+    // ------------------------------------------------------------
+    // 2. Load usage totals for current cycle
+    // ------------------------------------------------------------
+    const { data: usage } = await supabase
+      .from("usage_logs")
+      .select(`
+        pipelines_run,
+        provider_api_calls,
+        build_minutes
+      `)
+      .eq("org_id", orgId)
+      .gte("date", org.cycle_start)
+      .lte("date", org.cycle_end);
+
     // Aggregate usage
-    const usage = {
-      pipelines: usageRows?.reduce((sum, x) => sum + (x.pipelines_run || 0), 0),
-      provider_calls: usageRows?.reduce(
-        (sum, x) => sum + (x.provider_api_calls || 0),
-        0
-      ),
-      build_minutes: usageRows?.reduce(
-        (sum, x) => sum + (x.build_minutes || 0),
-        0
-      ),
+    const totals = {
+      pipelines: usage?.reduce((a, b) => a + (b.pipelines_run || 0), 0) ?? 0,
+      api_calls: usage?.reduce((a, b) => a + (b.provider_api_calls || 0), 0) ?? 0,
+      minutes: usage?.reduce((a, b) => a + (b.build_minutes || 0), 0) ?? 0,
     };
 
-    // -------------------------------------------------------
-    // 3. Check if user is within limits
-    // -------------------------------------------------------
-    let allowed = true;
-    let upgrade_required = false;
-    let message = undefined;
+    // ------------------------------------------------------------
+    // 3. Define plan limits  
+    // ------------------------------------------------------------
+    const limits: any = {
+      developer: {
+        pipelines: 5,
+        ai_calls: 20,
+        downloads: 0,
+        restore: false,
+        edit_files: false,
+        file_portal: false,
+      },
+      startup: {
+        pipelines: 100,
+        ai_calls: 500,
+        downloads: true,
+        restore: true,
+        edit_files: true,
+        file_portal: true,
+      },
+      team: {
+        pipelines: 500,
+        ai_calls: 2500,
+        downloads: true,
+        restore: true,
+        edit_files: true,
+        file_portal: true,
+      },
+      enterprise: {
+        pipelines: Infinity,
+        ai_calls: Infinity,
+        downloads: true,
+        restore: true,
+        edit_files: true,
+        file_portal: true,
+      },
+    };
 
-    if (
-      usage.pipelines >= limits.pipelines ||
-      usage.provider_calls >= limits.provider_calls ||
-      usage.build_minutes >= limits.build_minutes
-    ) {
-      allowed = false;
-      upgrade_required = plan !== "enterprise";
-      message = "You have reached your usage limits for this billing cycle.";
-    }
+    const planLimits = limits[plan];
+
+    // ------------------------------------------------------------
+    // 4. Determine remaining usage
+    // ------------------------------------------------------------
+    const remaining = {
+      pipelines:
+        planLimits.pipelines === Infinity
+          ? Infinity
+          : Math.max(0, planLimits.pipelines - totals.pipelines),
+
+      ai_calls:
+        planLimits.ai_calls === Infinity
+          ? Infinity
+          : Math.max(0, planLimits.ai_calls - totals.api_calls),
+    };
+
+    // Determine if upgrade banner should show
+    const upgrade_required =
+      plan !== "enterprise" &&
+      (remaining.pipelines <= 0 || remaining.ai_calls <= 0);
 
     return NextResponse.json({
-      allowed,
+      plan,
+      cycle_start: org.cycle_start,
+      cycle_end: org.cycle_end,
+
+      usage: totals,
+      limits: planLimits,
+      remaining,
+
       upgrade_required,
-      limits,
-      usage,
-      message,
+      upgrade_message: upgrade_required
+        ? "You are out of included usage for this plan. Upgrade to enable more pipelines + AI builds."
+        : null,
     });
   } catch (err: any) {
     console.error("Billing limits error:", err);
