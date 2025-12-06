@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * GET SINGLE TEMPLATE
- * --------------------------------------------------------
+ * ---------------------------------------------------
  * POST /api/templates/get
  *
  * Inputs:
@@ -13,91 +13,79 @@ import { createClient } from "@supabase/supabase-js";
  *    plan: string
  *  }
  *
- * Behavior:
- *  - Checks tier permissions
- *  - Ensures template category allowed for plan
- *  - Returns template body + metadata
- *  - Supports enterprise-only templates
+ * Returns:
+ *  - Full template object
+ *  - Blocks access based on plan/category rules
  */
 
 export async function POST(req: Request) {
   try {
     const { templateId, orgId, plan } = await req.json();
 
-    if (!templateId || !orgId || !plan) {
+    if (!templateId || !orgId) {
       return NextResponse.json(
-        { error: "Missing templateId, orgId, or plan" },
+        { error: "Missing templateId or orgId" },
         { status: 400 }
       );
     }
 
-    // --------------------------------------------------------
-    // Supabase Admin Client (RLS bypass for template reads)
-    // --------------------------------------------------------
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // --------------------------------------------------------
-    // Load template
-    // --------------------------------------------------------
-    const { data: template, error } = await supabase
-      .from("templates")
-      .select(
-        `
-        id,
-        name,
-        category,
-        provider,
-        description,
-        content,
-        updated_at
-      `
-      )
-      .eq("id", templateId)
-      .single();
-
-    if (error || !template) {
-      return NextResponse.json(
-        { error: "Template not found" },
-        { status: 404 }
-      );
-    }
-
-    // --------------------------------------------------------
-    // Access Permission Rules
-    // --------------------------------------------------------
-    const allowedCategories = {
+    // ----------------------------------------------------
+    // PERMISSIONS — allowed categories per paid tier
+    // ----------------------------------------------------
+    const allowedCategories: Record<string, string[]> = {
       developer: ["base"],
       startup: ["base", "provider"],
       team: ["base", "provider", "advanced"],
       enterprise: ["base", "provider", "advanced", "enterprise"],
     };
 
-    const planAllowed =
-      allowedCategories[plan as keyof typeof allowedCategories] ?? ["base"];
+    const allowed = allowedCategories[plan] ?? ["base"];
 
-    if (!planAllowed.includes(template.category)) {
+    // ----------------------------------------------------
+    // Supabase Admin Client
+    // ----------------------------------------------------
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // ----------------------------------------------------
+    // Load Template
+    // ----------------------------------------------------
+    const { data: template, error } = await supabase
+      .from("templates")
+      .select("*")
+      .eq("id", templateId)
+      .eq("org_id", orgId)
+      .is("deleted_at", null)
+      .single();
+
+    if (error || !template) {
+      return NextResponse.json(
+        { error: "Template not found or unauthorized" },
+        { status: 404 }
+      );
+    }
+
+    // ----------------------------------------------------
+    // Validate category access
+    // ----------------------------------------------------
+    if (!allowed.includes(template.category)) {
       return NextResponse.json(
         {
-          error: "Your plan does not include access to this template.",
+          error: `Your plan does not grant access to ${template.category} templates.`,
           upgrade_required: true,
-          required_category: template.category,
         },
         { status: 403 }
       );
     }
 
-    // --------------------------------------------------------
-    // Serve the template to the client
-    // --------------------------------------------------------
     return NextResponse.json({
       success: true,
       template,
     });
   } catch (err: any) {
-    console.error("Template get API error:", err);
+    console.error("Template GET error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
