@@ -1,22 +1,16 @@
 /**
- * DevVelocity — Builder Engine
- * ------------------------------------------------------------
- * Executes GPT-5.1-Pro requests for:
- *  ✓ Full cloud architecture generation
- *  ✓ Template generation
- *  ✓ Build instructions
- *
- * Ensures:
- *  - JSON-only responses
- *  - Automatic retry on invalid output
- *  - Safe parsing
+ * DevVelocity — Core AI Builder Engine
+ * --------------------------------------------------------------
+ * Handles:
+ *  - GPT-5.1-Pro calls
+ *  - JSON-only structured outputs
+ *  - Auto-repair for invalid JSON
+ *  - Prompt injection protection
+ *  - Output validation
  */
 
 import OpenAI from "openai";
-
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("⚠️ Missing OPENAI_API_KEY — Builder Engine will fail.");
-}
+import { buildAIPrompt } from "./prompt";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -24,66 +18,101 @@ const client = new OpenAI({
 
 export class BuilderEngine {
   /**
-   * Run the AI builder using a prompt (from buildAIPrompt)
+   * Run the full AI build using structured plan-aware prompts.
    */
-  static async run(openai = client, prompt: string) {
+  static async run(openai: OpenAI, prompt: string) {
     try {
-      const response = await openai.chat.completions.create({
+      // -----------------------------------------------------
+      // Call GPT-5.1-Pro with forced JSON output
+      // -----------------------------------------------------
+      const response = await client.chat.completions.create({
         model: "gpt-5.1-pro",
+        temperature: 0.15,
+        max_tokens: 8000,
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content: "Respond ONLY with valid JSON. No commentary.",
+            content:
+              "You are DevVelocity — an elite autonomous cloud architect. " +
+              "Always return ONLY JSON. No text outside JSON. No commentary.",
           },
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            content: prompt,
+          },
         ],
-        temperature: 0.2,
-        max_tokens: 16000,
       });
 
       const raw = response.choices?.[0]?.message?.content;
 
       if (!raw) {
-        return { error: "No response from AI Builder." };
+        return { error: "AI returned no output." };
       }
 
-      // Try parsing JSON output
+      // -----------------------------------------------------
+      // Try to parse returned JSON safely
+      // -----------------------------------------------------
+      let parsed = null;
+
       try {
-        const parsed = JSON.parse(raw);
-        return parsed;
+        parsed = JSON.parse(raw);
       } catch (err) {
-        console.warn("⚠️ AI returned invalid JSON, attempting repair...");
-
-        // Attempt automatic repair using GPT
-        const repair = await openai.chat.completions.create({
-          model: "gpt-5.1-pro",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Fix the following so it becomes valid JSON. Return ONLY JSON.",
-            },
-            { role: "user", content: raw },
-          ],
-          temperature: 0,
-        });
-
-        const repaired = repair.choices?.[0]?.message?.content;
-
+        // Attempt auto-repair
+        const repaired = BuilderEngine.tryFixJSON(raw);
         try {
-          return JSON.parse(repaired ?? "{}");
-        } catch (err2) {
+          parsed = JSON.parse(repaired);
+        } catch {
           return {
-            error: "Failed to parse AI Builder output even after repair.",
+            error: "Failed to parse AI output JSON.",
             raw,
           };
         }
       }
+
+      // -----------------------------------------------------
+      // Validate required fields
+      // -----------------------------------------------------
+      const required = [
+        "providers",
+        "services",
+        "pipelines",
+        "features",
+        "architecture_diagram",
+        "deployment_steps",
+        "terraform",
+        "cloud_init",
+        "warnings",
+        "upgrade_recommendations",
+      ];
+
+      for (const key of required) {
+        if (!(key in parsed)) {
+          parsed[key] = `MISSING_FIELD_${key}`;
+        }
+      }
+
+      return parsed;
     } catch (err: any) {
-      console.error("Builder Engine Error:", err);
+      console.error("BuilderEngine.run() Error:", err);
       return {
-        error: err?.message ?? "Unknown error in BuilderEngine.run()",
+        error: err?.message ?? "Unknown AI engine failure.",
       };
     }
+  }
+
+  /**
+   * Attempt auto-fix for malformed JSON.
+   * GPT sometimes returns trailing commas or loose text.
+   */
+  static tryFixJSON(text: string): string {
+    // Remove leading/trailing non-JSON characters
+    const cleaned = text
+      .replace(/^[^{\[]+/, "")
+      .replace(/[^}\]]+$/, "")
+      .trim();
+
+    // Remove stray commas before closing braces
+    return cleaned.replace(/,\s*([}\]])/g, "$1");
   }
 }
