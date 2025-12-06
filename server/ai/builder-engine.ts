@@ -1,118 +1,122 @@
+// server/ai/builder-engine.ts
+
 /**
- * DevVelocity — Core AI Builder Engine
- * --------------------------------------------------------------
- * Handles:
- *  - GPT-5.1-Pro calls
- *  - JSON-only structured outputs
- *  - Auto-repair for invalid JSON
- *  - Prompt injection protection
- *  - Output validation
+ * DevVelocity — AI Builder Engine
+ * ---------------------------------------------------------
+ * Responsible for:
+ *  ✓ Sending builder prompts to GPT-5.1-Pro
+ *  ✓ Enforcing JSON-only responses
+ *  ✓ Repairing malformed outputs
+ *  ✓ Normalizing the final architecture object
+ *  ✓ Returning a stable, predictable structure
  */
 
 import OpenAI from "openai";
-import { buildAIPrompt } from "./prompt";
 
-const client = new OpenAI({
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("⚠️ Missing OPENAI_API_KEY — AI Builder disabled.");
+}
+
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
 export class BuilderEngine {
   /**
-   * Run the full AI build using structured plan-aware prompts.
+   * Main run() method.
+   * Executes GPT-5.1-Pro with deterministic output.
    */
-  static async run(openai: OpenAI, prompt: string) {
+  static async run(prompt: string) {
     try {
-      // -----------------------------------------------------
-      // Call GPT-5.1-Pro with forced JSON output
-      // -----------------------------------------------------
-      const response = await client.chat.completions.create({
+      const completion = await openai.chat.completions.create({
         model: "gpt-5.1-pro",
-        temperature: 0.15,
-        max_tokens: 8000,
+        temperature: 0.2,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content:
-              "You are DevVelocity — an elite autonomous cloud architect. " +
-              "Always return ONLY JSON. No text outside JSON. No commentary.",
+            content: `
+You are DevVelocity — a deterministic cloud automation engine.
+Return ONLY valid JSON.
+If unsure, make a reasonable assumption.
+Never apologize. Never add explanations.
+            `,
           },
           {
             role: "user",
             content: prompt,
           },
         ],
+        max_tokens: 8000,
       });
 
-      const raw = response.choices?.[0]?.message?.content;
+      const raw = completion.choices?.[0]?.message?.content;
 
       if (!raw) {
-        return { error: "AI returned no output." };
+        return {
+          error: "No AI output received.",
+        };
       }
 
-      // -----------------------------------------------------
-      // Try to parse returned JSON safely
-      // -----------------------------------------------------
-      let parsed = null;
-
+      // -------------------------------------------------
+      // Ensure valid JSON
+      // -------------------------------------------------
+      let parsed;
       try {
         parsed = JSON.parse(raw);
       } catch (err) {
         // Attempt auto-repair
-        const repaired = BuilderEngine.tryFixJSON(raw);
-        try {
-          parsed = JSON.parse(repaired);
-        } catch {
-          return {
-            error: "Failed to parse AI output JSON.",
-            raw,
-          };
-        }
+        parsed = BuilderEngine.repairMalformedJSON(raw);
       }
 
-      // -----------------------------------------------------
-      // Validate required fields
-      // -----------------------------------------------------
-      const required = [
-        "providers",
-        "services",
-        "pipelines",
-        "features",
-        "architecture_diagram",
-        "deployment_steps",
-        "terraform",
-        "cloud_init",
-        "warnings",
-        "upgrade_recommendations",
-      ];
-
-      for (const key of required) {
-        if (!(key in parsed)) {
-          parsed[key] = `MISSING_FIELD_${key}`;
-        }
+      if (!parsed) {
+        return {
+          error: "AI returned invalid JSON.",
+          raw,
+        };
       }
 
-      return parsed;
+      // -------------------------------------------------
+      // Normalize output structure (guaranteed)
+      // -------------------------------------------------
+      return BuilderEngine.normalize(parsed);
     } catch (err: any) {
-      console.error("BuilderEngine.run() Error:", err);
+      console.error("AI Builder Engine Error:", err);
       return {
-        error: err?.message ?? "Unknown AI engine failure.",
+        error: err.message ?? "Unknown AI builder error",
       };
     }
   }
 
   /**
-   * Attempt auto-fix for malformed JSON.
-   * GPT sometimes returns trailing commas or loose text.
+   * Attempt to salvage malformed JSON.
    */
-  static tryFixJSON(text: string): string {
-    // Remove leading/trailing non-JSON characters
-    const cleaned = text
-      .replace(/^[^{\[]+/, "")
-      .replace(/[^}\]]+$/, "")
-      .trim();
+  static repairMalformedJSON(raw: string) {
+    try {
+      const fixed = raw
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
 
-    // Remove stray commas before closing braces
-    return cleaned.replace(/,\s*([}\]])/g, "$1");
+      return JSON.parse(fixed);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Ensure structure matches DevVelocity’s schema.
+   * (Prevents frontend crashes.)
+   */
+  static normalize(obj: any) {
+    return {
+      summary: obj.summary ?? "",
+      architecture: obj.architecture ?? {},
+      components: Array.isArray(obj.components) ? obj.components : [],
+      deployments: obj.deployments ?? {},
+      estimated_cost: obj.estimated_cost ?? {},
+      provider_count: obj.provider_count ?? 1,
+      metadata: obj.metadata ?? {},
+    };
   }
 }
