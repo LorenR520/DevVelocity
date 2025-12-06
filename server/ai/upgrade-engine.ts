@@ -1,117 +1,162 @@
+// server/ai/upgrade-engine.ts
+
 /**
  * DevVelocity — AI Upgrade Engine
- * -----------------------------------------------------------
- * Evaluates AI Builder output and determines:
- *  - whether current plan supports generated architecture
- *  - if upgrade is required
- *  - recommended tier
- *  - warnings for over-limit usage
- *
- * Works with new paid Developer tier (no free plans).
+ * ---------------------------------------------------
+ * Responsibilities:
+ *  ✓ Detect outdated/broken architecture JSON
+ *  ✓ Compare against current DevVelocity standards
+ *  ✓ Provide required + optional upgrades
+ *  ✓ Enforce plan limits (developer/startup/team/enterprise)
+ *  ✓ Produce corrected JSON output
  */
 
-import { getPlan } from "@/ai-builder/plan-logic";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
+
+/**
+ * Plan capability map
+ * Determines if a user’s plan allows advanced features
+ */
+const PLAN_CAPABILITIES = {
+  developer: {
+    maxProviders: 1,
+    allowFailover: false,
+    allowAutoscale: false,
+    allowEnterpriseFeatures: false,
+  },
+  startup: {
+    maxProviders: 3,
+    allowFailover: false,
+    allowAutoscale: true,
+    allowEnterpriseFeatures: false,
+  },
+  team: {
+    maxProviders: 7,
+    allowFailover: true,
+    allowAutoscale: true,
+    allowEnterpriseFeatures: false,
+  },
+  enterprise: {
+    maxProviders: Infinity,
+    allowFailover: true,
+    allowAutoscale: true,
+    allowEnterpriseFeatures: true,
+  },
+};
 
 export class UpgradeEngine {
   /**
-   * Main evaluation method
+   * Analyze an AI Builder output for plan restrictions
    */
   static async evaluate(aiOutput: any, planId: string) {
-    const plan = getPlan(planId);
+    const capabilities = PLAN_CAPABILITIES[planId] ?? PLAN_CAPABILITIES.developer;
 
-    if (!plan) {
-      return {
-        needsUpgrade: true,
-        message: "Invalid plan tier.",
-        recommendedPlan: "startup",
-      };
+    let needsUpgrade = false;
+    let reasons: string[] = [];
+
+    const providerCount =
+      Array.isArray(aiOutput?.providers)
+        ? aiOutput.providers.length
+        : 1;
+
+    // Enforce provider limits
+    if (providerCount > capabilities.maxProviders) {
+      needsUpgrade = true;
+      reasons.push(
+        `Your current plan allows up to ${capabilities.maxProviders} cloud providers.`
+      );
     }
 
-    // Nothing to evaluate
-    if (!aiOutput) {
+    // Failover requires Team+
+    if (aiOutput?.architecture?.multiCloudFailover && !capabilities.allowFailover) {
+      needsUpgrade = true;
+      reasons.push("Multi-cloud failover requires the Team plan or higher.");
+    }
+
+    // Autoscaling requires Startup+
+    if (aiOutput?.architecture?.autoscaling && !capabilities.allowAutoscale) {
+      needsUpgrade = true;
+      reasons.push("Autoscaling requires the Startup plan or higher.");
+    }
+
+    // Enterprise SSO, compliance, or audit logging
+    if (
+      aiOutput?.enterprise?.security ||
+      aiOutput?.enterprise?.governance ||
+      aiOutput?.enterprise?.compliance
+    ) {
+      if (!capabilities.allowEnterpriseFeatures) {
+        needsUpgrade = true;
+        reasons.push("Enterprise compliance and governance require the Enterprise plan.");
+      }
+    }
+
+    if (!needsUpgrade) {
       return { needsUpgrade: false };
     }
 
-    // -------------------------------------------------------
-    // Extract architecture metadata
-    // -------------------------------------------------------
-    const providersUsed = aiOutput.providers?.length ?? 0;
-    const pipelinesUsed = aiOutput.pipelines?.length ?? 0;
-    const featuresUsed = aiOutput.features?.length ?? 0;
+    // Recommend next plan
+    const recommendedPlan =
+      planId === "developer"
+        ? "startup"
+        : planId === "startup"
+        ? "team"
+        : "enterprise";
 
-    // -------------------------------------------------------
-    // Compare to plan capabilities
-    // -------------------------------------------------------
-    const providerLimit = plan.providers === "unlimited" ? Infinity : plan.providers;
-    const pipelineLimit = plan.limits?.pipelines ?? Infinity;
-    const featureLimit = plan.limits?.api_calls ?? Infinity; // loosely approximate
-
-    // -------------------------------------------------------
-    // Provider Limit
-    // -------------------------------------------------------
-    if (providersUsed > providerLimit) {
-      const recommended = UpgradeEngine.recommendPlan(providersUsed);
-      return {
-        needsUpgrade: true,
-        recommendedPlan: recommended,
-        message: `This architecture requires ${providersUsed} cloud providers, but your plan supports only ${providerLimit}. Upgrade to ${recommended}.`,
-      };
-    }
-
-    // -------------------------------------------------------
-    // Pipeline Limit
-    // -------------------------------------------------------
-    if (pipelinesUsed > pipelineLimit) {
-      const recommended = UpgradeEngine.recommendPlan(pipelinesUsed);
-      return {
-        needsUpgrade: true,
-        recommendedPlan: recommended,
-        message: `Your architecture contains ${pipelinesUsed} CI/CD pipelines, exceeding your current plan’s limit of ${pipelineLimit}.`,
-      };
-    }
-
-    // -------------------------------------------------------
-    // Feature complexity (soft check)
-    // -------------------------------------------------------
-    if (planId === "developer" && featuresUsed > 30) {
-      return {
-        needsUpgrade: true,
-        recommendedPlan: "startup",
-        message:
-          "This architecture is too complex for the Developer tier. Upgrade to unlock advanced automation and multi-provider features.",
-      };
-    }
-
-    if (planId === "startup" && featuresUsed > 75) {
-      return {
-        needsUpgrade: true,
-        recommendedPlan: "team",
-        message:
-          "Your architecture contains enterprise-level features exceeding Startup tier thresholds.",
-      };
-    }
-
-    // -------------------------------------------------------
-    // Enterprise = always allowed
-    // -------------------------------------------------------
-    if (planId === "enterprise") {
-      return { needsUpgrade: false };
-    }
-
-    // -------------------------------------------------------
-    // Allowed
-    // -------------------------------------------------------
     return {
-      needsUpgrade: false,
+      needsUpgrade: true,
+      message: reasons.join(" "),
+      recommendedPlan,
     };
   }
 
   /**
-   * Picks the recommended plan for the architecture
+   * Modernize an existing saved architecture file using GPT-5.1-Pro
    */
-  static recommendPlan(requiredProviders: number): string {
-    if (requiredProviders <= 3) return "startup";
-    if (requiredProviders <= 7) return "team";
-    return "enterprise";
+  static async modernize(file: any, planId: string) {
+    const prompt = `
+You are DevVelocity Upgrade Engine.
+Your job:
+1. Take outdated infrastructure JSON.
+2. Fix deprecated fields.
+3. Normalize the provider structure.
+4. Ensure compatibility with latest multi-cloud standards.
+5. Remove invalid keys.
+6. DO NOT add features beyond the user’s plan tier (${planId}).
+7. Output strictly valid JSON — no markdown.
+
+Here is the file to upgrade:
+
+${JSON.stringify(file, null, 2)}
+    `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.1-pro",
+      messages: [
+        { role: "system", content: "Return ONLY valid JSON." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.15,
+      max_tokens: 6000,
+      response_format: { type: "json_object" },
+    });
+
+    const raw = response.choices?.[0]?.message?.content;
+
+    if (!raw) return { error: "No output from upgrade engine." };
+
+    try {
+      const json = JSON.parse(raw);
+      return { upgraded: json };
+    } catch (err) {
+      return {
+        error: "Could not parse upgraded JSON.",
+        raw,
+      };
+    }
   }
 }
