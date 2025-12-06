@@ -1,98 +1,111 @@
 // server/ai/builder-engine.ts
 
 /**
- * DevVelocity AI — Builder Engine
+ * DevVelocity Builder Engine
  * ------------------------------------------------------------
- * Executes:
- *  ✓ GPT-5.1-Pro JSON-based infrastructure generation
- *  ✓ Deterministic schema mapping
- *  ✓ Validation + sanitization
- *  ✓ Null-fill for incomplete fields
- *  ✓ Error reporting for malformed AI output
+ * Responsible for:
+ *  ✓ Calling GPT-5.1-Pro
+ *  ✓ Enforcing JSON-only output
+ *  ✓ Auto-fixing malformed JSON (retry engine)
+ *  ✓ Enforcing plan rules (handled upstream)
+ *  ✓ Returning clean "architecture" object
  */
 
 import OpenAI from "openai";
-import { validateArchitectureShape } from "./validators/schema-validator";
+import { AICreditTracking } from "./credit-tracking";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+// -------------------------------
+// Retry policy for malformed JSON
+// -------------------------------
+const MAX_RETRIES = 3;
+
 export class BuilderEngine {
   /**
-   * Run main AI builder flow.
+   * Run AI Builder with retries + JSON validation
    */
-  static async run(openaiClient: any, prompt: string) {
-    try {
-      // -----------------------------
-      // 1. Request structured JSON
-      // -----------------------------
-      const response = await openaiClient.chat.completions.create({
-        model: "gpt-5.1-pro",
-        temperature: 0.1,
-        max_tokens: 8000,
-        response_format: {
-          type: "json_object",
-        },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Respond ONLY in valid JSON. No text, no markdown, no explanations.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      });
+  static async run(openaiClient: OpenAI, prompt: string) {
+    let lastError = null;
 
-      const raw = response.choices?.[0]?.message?.content;
-
-      if (!raw) {
-        return {
-          error: "AI Builder returned empty output.",
-        };
-      }
-
-      // -----------------------------
-      // 2. Parse JSON safely
-      // -----------------------------
-      let parsed;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        parsed = JSON.parse(raw);
+        console.log(`🧠 AI Builder: Attempt ${attempt}/${MAX_RETRIES}`);
+
+        const completion = await openaiClient.chat.completions.create({
+          model: "gpt-5.1-pro",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are DevVelocity, an autonomous cloud architect. " +
+                "Output ONLY valid JSON. No comments. No markdown.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          temperature: 0.15,
+          max_tokens: 6000,
+        });
+
+        const raw = completion.choices?.[0]?.message?.content ?? "";
+
+        // -------------------------------
+        // Try to parse JSON from output
+        // -------------------------------
+        let parsed = null;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (jsonErr) {
+          console.warn("⚠️ JSON parse failed:", jsonErr);
+          lastError = jsonErr;
+          continue; // retry
+        }
+
+        // -------------------------------
+        // Validate architecture structure
+        // -------------------------------
+        if (!parsed.architecture) {
+          lastError = new Error("AI output missing architecture field");
+          continue;
+        }
+
+        // -------------------------------
+        // Token usage billing (estimate)
+        // -------------------------------
+        const inputTokens =
+          completion.usage?.prompt_tokens ?? raw.length / 4;
+        const outputTokens =
+          completion.usage?.completion_tokens ??
+          JSON.stringify(parsed).length / 4;
+
+        await AICreditTracking.record({
+          orgId: parsed.orgId ?? "unknown",
+          planId: parsed.plan ?? "developer",
+          inputTokens,
+          outputTokens,
+        });
+
+        // SUCCESS
+        return parsed;
       } catch (err) {
-        return {
-          error: "Malformed AI JSON output.",
-          raw,
-        };
+        console.error("AI Builder Engine Error:", err);
+        lastError = err;
       }
-
-      // -----------------------------
-      // 3. Validate against schema
-      // -----------------------------
-      const validated = validateArchitectureShape(parsed);
-
-      if (!validated.valid) {
-        return {
-          error: "Output failed schema validation.",
-          details: validated.issues,
-          raw: parsed,
-        };
-      }
-
-      // -----------------------------
-      // 4. Return sanitized output
-      // -----------------------------
-      return {
-        success: true,
-        architecture: validated.cleaned,
-      };
-    } catch (err: any) {
-      console.error("AI Builder Engine Error:", err);
-      return {
-        error: err.message ?? "AI Builder Engine encountered an error.",
-      };
     }
+
+    // -------------------------------
+    // FAIL after max retries
+    // -------------------------------
+    return {
+      error:
+        lastError?.message ??
+        "AI Builder failed after maximum retry attempts.",
+      raw: lastError,
+    };
   }
 }
