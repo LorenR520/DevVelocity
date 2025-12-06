@@ -5,26 +5,27 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * RESTORE A SOFT-DELETED FILE
- * ------------------------------------------------------------
+ * ----------------------------------------------------------
+ * POST /api/files/restore-deleted
+ *
  * Inputs:
  *  {
  *    fileId: string,
  *    orgId: string,
- *    plan: string,
- *    userId: string
+ *    userId: string,
+ *    plan: string
  *  }
  *
  * Behavior:
- *  - Developer → allowed (because restore is not heavy infra)
- *  - Startup / Team / Enterprise → allowed
- *  - Ensures file belongs to org
- *  - Clears deleted_at timestamp
- *  - Logs restore event
+ *  - ALL PAID TIERS (Developer → Enterprise) may restore
+ *  - Ensures file belongs to the org
+ *  - Sets deleted_at = null
+ *  - Logs restoration event
  */
 
 export async function POST(req: Request) {
   try {
-    const { fileId, orgId, plan, userId } = await req.json();
+    const { fileId, orgId, userId, plan } = await req.json();
 
     if (!fileId || !orgId || !userId) {
       return NextResponse.json(
@@ -33,17 +34,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Supabase Admin client
-    // --------------------------------------------------
+    // -----------------------------------------------------
+    // ⚠️ All tiers are paid (Developer is NOT free)
+    // Therefore, restore is ALWAYS allowed
+    // -----------------------------------------------------
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // --------------------------------------------------
-    // Load deleted file
-    // --------------------------------------------------
+    // -----------------------------------------------------
+    // 1. Fetch file and confirm org ownership
+    // -----------------------------------------------------
     const { data: file, error: fileErr } = await supabase
       .from("files")
       .select("*")
@@ -53,11 +56,12 @@ export async function POST(req: Request) {
 
     if (fileErr || !file) {
       return NextResponse.json(
-        { error: "File not found" },
+        { error: "File not found or does not belong to this org" },
         { status: 404 }
       );
     }
 
+    // File is not deleted?
     if (!file.deleted_at) {
       return NextResponse.json(
         { error: "File is not deleted" },
@@ -65,40 +69,41 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Restore the file (undelete)
-    // --------------------------------------------------
-    const { error: updateErr } = await supabase
+    // -----------------------------------------------------
+    // 2. Restore the file
+    // -----------------------------------------------------
+    const { error: restoreErr } = await supabase
       .from("files")
       .update({
         deleted_at: null,
         updated_at: new Date().toISOString(),
-        last_modified_by: userId
+        last_modified_by: userId,
       })
-      .eq("id", fileId);
+      .eq("id", fileId)
+      .eq("org_id", orgId);
 
-    if (updateErr) {
+    if (restoreErr) {
       return NextResponse.json(
         { error: "Failed to restore file" },
         { status: 500 }
       );
     }
 
-    // --------------------------------------------------
-    // Log usage (non-billable)
-    // --------------------------------------------------
+    // -----------------------------------------------------
+    // 3. Log restoration as an activity record
+    // -----------------------------------------------------
     await supabase.from("usage_logs").insert({
       org_id: orgId,
+      restored_files: 1,
       pipelines_run: 0,
       provider_api_calls: 0,
       build_minutes: 0,
-      restored_files: 1,
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
     });
 
     return NextResponse.json({
       success: true,
-      message: "File restored successfully"
+      message: "File restored successfully",
     });
   } catch (err: any) {
     console.error("Restore-deleted route error:", err);
