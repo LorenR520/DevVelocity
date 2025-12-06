@@ -1,221 +1,135 @@
 /**
- * DevVelocity AI Prompt Engine (Full Version)
- * ------------------------------------------------------------
- * This engine builds a high-accuracy prompt for the AI Builder.
- * Features:
- *  - Multi-cloud awareness
- *  - Budget → infra mapping
- *  - Experience-level tuning
- *  - Region considerations
- *  - Feature → component expansion
- *  - Tier-based constraints
- *  - Hooks for documentation scraping subsystem
+ * DevVelocity — AI Prompt Generator Layer
+ * -----------------------------------------------------------
+ * Centralized prompt builder for:
+ *  ✓ Infrastructure Generation (AI Builder)
+ *  ✓ Legacy File Upgrade
+ *  ✓ Provider Recommendation / Initial Guidance
+ *
+ * All prompts are tier-aware and cloud-agnostic.
  */
 
-import { getPlan } from "@/ai-builder/plan-logic";
-import { PROVIDER_DEFAULTS } from "@/constants/provider-defaults";
-import { FEATURE_MAP } from "@/constants/feature-map";
+import pricing from "../../marketing/pricing.json";
 
+/* -----------------------------------------------------------
+   1. AI BUILDER PROMPT (primary generation prompt)
+----------------------------------------------------------- */
 export function buildAIPrompt(answers: any) {
-  const {
-    provider,
-    budget,
-    experience,
-    environment,
-    region,
-    features = [],
-    plan = "developer",
-    scrapedDocs = null,   // auto-filled by cron scraper later
-  } = answers;
+  const plan = answers.plan ?? "developer";
 
-  const planInfo = getPlan(plan);
-
-  // ---------------------------
-  // Provider Expansion Logic
-  // ---------------------------
-  const providerDefaults = PROVIDER_DEFAULTS[provider] ?? {};
-  const expandedFeatures = expandFeatures(features);
-
-  // ---------------------------
-  // Tier Enforcement
-  // ---------------------------
-  const tierInstructions = buildTierConstraints(plan);
-
-  // ---------------------------
-  // Scraper Documentation Injection
-  // ---------------------------
-  const docInjection = scrapedDocs
-    ? `
-The following are the most recent authoritative provider docs:
-${scrapedDocs.slice(0, 8000)}
-(Only reference these docs when constructing examples, naming conventions, and infra definitions.)
-`
-    : `
-No scraped documentation available. Use safest known defaults.
-`;
-
-  // ---------------------------
-  // Experience Level Mapping
-  // ---------------------------
-  const experienceInstructions = {
-    beginner: `
-User is inexperienced. Favor managed services, higher-level abstractions,
-minimal YAML, and zero manual scaling. Avoid complexity.
-`,
-    intermediate: `
-User has moderate experience. Use a balanced design with managed components,
-but include optional customization parameters.
-`,
-    expert: `
-User is advanced. Include tunable configs, scalable architectures,
-and deeper infra surfaces.
-`,
-  }[experience] ?? "";
-
-  // ---------------------------
-  // Budget Mapping
-  // ---------------------------
-  const budgetMap = {
-    low: `
-Budget priority: Minimize cost. Use serverless, autoscaling, and minimal baseline infra.
-Avoid multi-zone deployments unless required.
-`,
-    medium: `
-Balanced cost/performance. Use a combination of serverless + container-based compute.
-`,
-    high: `
-Cost is not a concern. Favor high availability, multi-zone,
-dedicated compute, and resilient patterns.
-`,
-  }[budget] ?? "";
-
-  // ---------------------------
-  // Main Prompt Body
-  // ---------------------------
   return `
-You are DevVelocity — an autonomous infrastructure architect.
-Your job is to generate complete, production-ready infrastructure outputs.
+You are DevVelocity — an autonomous cloud architecture generator.
 
-User Inputs
------------
-Provider: ${provider}
-Budget: ${budget}
-Experience: ${experience}
-Environment: ${environment}
-Region: ${region}
-Requested Features: ${features.join(", ") || "None"}
-Expanded Feature Set: ${expandedFeatures.join(", ")}
-Tier: ${plan}
+USER PLAN: ${plan.toUpperCase()}
+BUILD CONTEXT:
+${JSON.stringify(answers, null, 2)}
 
-Tier Rules
-----------
-${tierInstructions}
-
-Provider Knowledge
-------------------
-${JSON.stringify(providerDefaults, null, 2)}
-
-Budget Constraints
-------------------
-${budgetMap}
-
-Experience Constraints
-----------------------
-${experienceInstructions}
-
-Documentation (Scraped)
------------------------
-${docInjection}
-
-Output Requirements
--------------------
-Produce a single JSON object with the following fields:
+Your task:
+1. Generate a complete infrastructure plan based on the answers.
+2. Output JSON ONLY — no commentary.
+3. Structure the output as:
 
 {
-  "architecture": {
-     "provider": "...",
-     "region": "...",
-     "components": [...detailed infra...]
+  "providers": [...],         
+  "environment": "...",
+  "region": "...",
+  "services": {
+    "compute": [...],
+    "databases": [...],
+    "networking": [...],
+    "storage": [...],
+    "monitoring": [...],
+    "security": [...]
   },
-  "configs": {
-    "cloud_init": "...",
-    "terraform": "...",
-    "docker": "...",
-    "kubernetes": "...(if applicable)"
+  "cost_estimate": {
+    "monthly": <number>,
+    "breakdown": {
+      ...
+    }
   },
-  "policies": {
-    "iam": [...],
-    "network": [...],
-    "scaling": [...]
+  "features": [...],
+  "scaling": {
+    "method": "...",
+    "details": { ... }
   },
-  "explanation": "Short explanation of design choices based on tier, budget, & experience."
+  "notes": "..."
 }
 
-Constraints:
-- NEVER fabricate services that do not exist.
-- Use real provider naming.
-- Follow scraped documentation EXACTLY when available.
-- Developer = simplest output.
-- Startup = advanced but safe.
-- Team = production-grade.
-- Enterprise = zero-downtime, multi-cloud optional.
-
-Begin now.
-`;
+Rules:
+- Stay within capabilities of the ${plan} plan.
+- If asked for features outside the plan (multi-cloud failover, enterprise SSO, advanced scaling), include them anyway but clearly flag them in "features".
+- Use realistic cloud-native components.
+- DO NOT use placeholders — always fill fields completely.
+- Respond with valid JSON only.
+  `;
 }
 
-// ------------------------------------------------------------
-// Feature Expansion
-// ------------------------------------------------------------
-function expandFeatures(features: string[]) {
-  let expanded: string[] = [];
+/* -----------------------------------------------------------
+   2. UPGRADE PROMPT
+   Converts old JSON → new DevVelocity-compliant schema
+----------------------------------------------------------- */
+export function buildUpgradePrompt(oldFile: any, plan: string) {
+  const planInfo = pricing.plans.find((p) => p.id === plan);
 
-  for (const f of features) {
-    if (FEATURE_MAP[f]) expanded.push(...FEATURE_MAP[f]);
-    else expanded.push(f);
-  }
+  return `
+You are DevVelocity's Automated Upgrade System.
 
-  return [...new Set(expanded)];
+Task:
+Upgrade the provided infrastructure JSON file to match the latest DevVelocity schema.
+
+Existing File:
+${JSON.stringify(oldFile, null, 2)}
+
+User Plan: ${plan.toUpperCase()}
+Allowed Providers: ${planInfo?.providers ?? "unknown"}
+
+Upgrade Requirements:
+- Fix deprecated fields.
+- Add missing fields.
+- Normalize compute/storage/networking blocks.
+- Preserve user intent.
+- If the file contains features ABOVE their plan tier, keep them BUT add a "requiresUpgrade": true flag.
+- If the file is invalid JSON, repair it.
+- Output valid JSON only.
+
+Final Output Format:
+{
+  "upgraded": { ... },
+  "notes": "...",
+  "requiresUpgrade": true | false
 }
 
-// ------------------------------------------------------------
-// Tier Constraints
-// ------------------------------------------------------------
-function buildTierConstraints(plan: string) {
-  switch (plan) {
-    case "developer":
-      return `
-Developer Tier Rules:
-- Simple architectures only.
-- No multi-cloud.
-- No advanced HA patterns.
-- No complex resilience systems.
-`;
+Respond with JSON ONLY.
+  `;
+}
 
-    case "startup":
-      return `
-Startup Tier Rules:
-- High-level production architecture.
-- Single provider only.
-- Optional autoscaling.
-`;
+/* -----------------------------------------------------------
+   3. RECOMMENDATION PROMPT
+   Provider → features → best practices
+----------------------------------------------------------- */
+export function buildRecommendationPrompt(inputs: any) {
+  return `
+You are DevVelocity — a cloud provider recommendation engine.
 
-    case "team":
-      return `
-Team Tier Rules:
-- Production-grade infra.
-- Optional hybrid patterns.
-- Advanced monitoring.
-- CI/CD expected.
-`;
+User Inputs:
+${JSON.stringify(inputs, null, 2)}
 
-    case "enterprise":
-      return `
-Enterprise Tier Rules:
-- Zero downtime.
-- Multi-cloud failover allowed.
-- Highly detailed IAM + policies.
-- Can use advanced distributed systems.
-`;
-  }
+Task:
+Recommend:
+- Best provider(s)
+- Most cost-effective architecture
+- Risk factors
+- Deployment strategy
+
+Response Format:
+{
+  "recommended_providers": [...],
+  "reasoning": "...",
+  "suggested_architecture": { ... },
+  "cost_tier": "low" | "medium" | "high",
+  "notes": "..."
+}
+
+Return JSON ONLY.
+  `;
 }
