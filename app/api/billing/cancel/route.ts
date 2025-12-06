@@ -1,51 +1,48 @@
-// app/api/billing/cancel/route.ts
-
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * CANCEL SUBSCRIPTION (NON-DESTRUCTIVE)
- * ---------------------------------------------------------------
- * POST /api/billing/cancel
+ * CANCEL SUBSCRIPTION (ALL PAID TIERS)
+ * -------------------------------------------------------
+ * Applies to:
+ *  - developer
+ *  - startup
+ *  - team
+ *  - enterprise
  *
- * Input:
- *  {
- *    orgId: string,
- *    reason: string,
- *    billingProvider: "stripe" | "lemon"
- *  }
+ * There are **no free tiers** in DevVelocity.
  *
  * Behavior:
- *  - Does NOT immediately delete subscription (prevents revenue loss)
- *  - Marks subscription as "cancel_at_period_end"
- *  - Stores cancellation reason + timestamp
- *  - Works for Stripe and Lemon
- *  - Sends retention trigger events (optional)
+ *  1. Validate user + org
+ *  2. Look up active subscription in DB
+ *  3. Cancel via Stripe or Lemon Squeezy
+ *  4. Mark org as "canceled" internally
+ *  5. Log event to usage_logs
  */
 
 export async function POST(req: Request) {
   try {
-    const { orgId, reason, billingProvider } = await req.json();
+    const { orgId, userId } = await req.json();
 
-    if (!orgId) {
+    if (!orgId || !userId) {
       return NextResponse.json(
-        { error: "Missing orgId" },
+        { error: "Missing orgId or userId" },
         { status: 400 }
       );
     }
 
-    // -------------------------------------------------------
-    // Load organization to fetch billing info
-    // -------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // -------------------------------------------------------
+    // 1. Fetch organization + subscription info
+    // -------------------------------------------------------
     const { data: org, error: orgErr } = await supabase
       .from("organizations")
-      .select("plan_id, billing_provider, stripe_subscription_id, lemon_subscription_id")
+      .select("*")
       .eq("id", orgId)
       .single();
 
@@ -56,29 +53,29 @@ export async function POST(req: Request) {
       );
     }
 
-    const provider = billingProvider ?? org.billing_provider ?? "stripe";
+    // No free tier — Developer is also treated as a paid tier.
+    const plan = org.plan_id;
 
-    // -------------------------------------------------------
-    // Developer plan can't cancel because nothing is billed
-    // -------------------------------------------------------
-    if (org.plan_id === "developer") {
+    const allowedPlans = ["developer", "startup", "team", "enterprise"];
+    if (!allowedPlans.includes(plan)) {
       return NextResponse.json(
-        { error: "Developer plan has no active subscription to cancel." },
-        { status: 400 }
+        { error: "Invalid plan type" },
+        { status: 500 }
       );
     }
 
-    // -------------------------------------------------------
-    // STRIPE CANCELLATION
-    // -------------------------------------------------------
-    if (provider === "stripe") {
-      if (!org.stripe_subscription_id) {
-        return NextResponse.json(
-          { error: "No Stripe subscription found for this org." },
-          { status: 400 }
-        );
-      }
+    // Already canceled?
+    if (org.subscription_status === "canceled") {
+      return NextResponse.json({
+        success: true,
+        message: "Subscription already canceled.",
+      });
+    }
 
+    // -------------------------------------------------------
+    // 2. Cancel Stripe subscription (if exists)
+    // -------------------------------------------------------
+    if (org.stripe_subscription_id) {
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
         apiVersion: "2023-10-16",
       });
@@ -86,73 +83,63 @@ export async function POST(req: Request) {
       await stripe.subscriptions.update(org.stripe_subscription_id, {
         cancel_at_period_end: true,
       });
-
-      // Store cancellation metadata
-      await supabase.from("billing_cancellations").insert({
-        org_id: orgId,
-        provider: "stripe",
-        reason: reason ?? "No reason provided",
-        timestamp: new Date().toISOString(),
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Subscription will cancel at the end of the billing period.",
-      });
     }
 
     // -------------------------------------------------------
-    // LEMON SQUEEZY CANCELLATION
+    // 3. Cancel Lemon Squeezy subscription (if exists)
     // -------------------------------------------------------
-    if (provider === "lemon") {
-      if (!org.lemon_subscription_id) {
-        return NextResponse.json(
-          { error: "No Lemon Squeezy subscription found." },
-          { status: 400 }
-        );
-      }
-
-      const lemonApi = process.env.LEMON_API_KEY!;
-
+    if (org.lemon_subscription_id) {
       await fetch(
         `https://api.lemonsqueezy.com/v1/subscriptions/${org.lemon_subscription_id}`,
         {
           method: "PATCH",
           headers: {
-            Authorization: `Bearer ${lemonApi}`,
             "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.LEMON_SQUEEZY_API_KEY}`,
           },
           body: JSON.stringify({
             data: {
               type: "subscriptions",
+              id: org.lemon_subscription_id,
               attributes: {
-                cancel_at_period_end: true,
+                canceled: true,
               },
             },
           }),
         }
       );
-
-      await supabase.from("billing_cancellations").insert({
-        org_id: orgId,
-        provider: "lemon",
-        reason: reason ?? "No reason provided",
-        timestamp: new Date().toISOString(),
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Your plan will cancel at the end of the current term.",
-      });
     }
 
-    return NextResponse.json(
-      { error: "Unsupported billing provider" },
-      { status: 400 }
-    );
+    // -------------------------------------------------------
+    // 4. Update org's internal status
+    // -------------------------------------------------------
+    await supabase
+      .from("organizations")
+      .update({
+        subscription_status: "canceled",
+        plan_id: "canceled", // remove features
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orgId);
 
+    // -------------------------------------------------------
+    // 5. Log usage / audit
+    // -------------------------------------------------------
+    await supabase.from("usage_logs").insert({
+      org_id: orgId,
+      canceled_subscriptions: 1,
+      pipelines_run: 0,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      date: new Date().toISOString(),
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Subscription canceled successfully.",
+    });
   } catch (err: any) {
-    console.error("Cancel-subscription error:", err);
+    console.error("Cancel subscription error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
