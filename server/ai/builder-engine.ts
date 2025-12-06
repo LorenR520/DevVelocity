@@ -1,123 +1,89 @@
 /**
- * DevVelocity AI — Builder Engine
+ * DevVelocity — Builder Engine
  * ------------------------------------------------------------
- * Responsible for:
- *  ✓ Sending prompt to GPT-5.1-Pro
- *  ✓ Enforcing JSON-only output
- *  ✓ Returning token counts
- *  ✓ Auto-repairing malformed AI JSON
+ * Executes GPT-5.1-Pro requests for:
+ *  ✓ Full cloud architecture generation
+ *  ✓ Template generation
+ *  ✓ Build instructions
+ *
+ * Ensures:
+ *  - JSON-only responses
+ *  - Automatic retry on invalid output
+ *  - Safe parsing
  */
 
 import OpenAI from "openai";
 
-const openai = new OpenAI({
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("⚠️ Missing OPENAI_API_KEY — Builder Engine will fail.");
+}
+
+const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
 export class BuilderEngine {
-  static async run(prompt: string) {
+  /**
+   * Run the AI builder using a prompt (from buildAIPrompt)
+   */
+  static async run(openai = client, prompt: string) {
     try {
-      // --------------------------------------------------------
-      // 🔥 Call GPT-5.1-Pro with JSON-only enforced
-      // --------------------------------------------------------
       const response = await openai.chat.completions.create({
         model: "gpt-5.1-pro",
         messages: [
           {
             role: "system",
-            content:
-              "You are DevVelocity's infrastructure builder AI. " +
-              "Respond ONLY with valid JSON. No text before or after. " +
-              "Do not explain yourself.",
+            content: "Respond ONLY with valid JSON. No commentary.",
           },
-          {
-            role: "user",
-            content: prompt,
-          },
+          { role: "user", content: prompt },
         ],
         temperature: 0.2,
-        max_tokens: 7000,
-        response_format: { type: "json_object" },
+        max_tokens: 16000,
       });
 
-      const content = response.choices?.[0]?.message?.content;
+      const raw = response.choices?.[0]?.message?.content;
 
-      if (!content) {
-        return { error: "No AI output returned." };
+      if (!raw) {
+        return { error: "No response from AI Builder." };
       }
 
-      // --------------------------------------------------------
-      // 🧪 Attempt to parse AI JSON output
-      // --------------------------------------------------------
-      let parsed: any = null;
-
+      // Try parsing JSON output
       try {
-        parsed = JSON.parse(content);
+        const parsed = JSON.parse(raw);
+        return parsed;
       } catch (err) {
-        // --------------------------------------------------------
-        // ⚠️ Try fixing JSON using secondary repair prompt
-        // --------------------------------------------------------
-        const repaired = await BuilderEngine.repairJSON(content);
-        if (!repaired.success) {
-          return { error: "Malformed JSON and auto-repair failed.", raw: content };
+        console.warn("⚠️ AI returned invalid JSON, attempting repair...");
+
+        // Attempt automatic repair using GPT
+        const repair = await openai.chat.completions.create({
+          model: "gpt-5.1-pro",
+          messages: [
+            {
+              role: "system",
+              content:
+                "Fix the following so it becomes valid JSON. Return ONLY JSON.",
+            },
+            { role: "user", content: raw },
+          ],
+          temperature: 0,
+        });
+
+        const repaired = repair.choices?.[0]?.message?.content;
+
+        try {
+          return JSON.parse(repaired ?? "{}");
+        } catch (err2) {
+          return {
+            error: "Failed to parse AI Builder output even after repair.",
+            raw,
+          };
         }
-        parsed = repaired.json;
       }
-
-      // --------------------------------------------------------
-      // 📊 Extract token usage
-      // --------------------------------------------------------
-      const tokenUsage = {
-        input: response.usage?.prompt_tokens ?? 1500,
-        output: response.usage?.completion_tokens ?? 3500,
-      };
-
-      return {
-        success: true,
-        json: parsed,
-        tokenUsage,
-      };
     } catch (err: any) {
       console.error("Builder Engine Error:", err);
-      return { error: err.message ?? "BuilderEngine failed." };
-    }
-  }
-
-  /**
-   * Attempts to repair malformed JSON using GPT-4 level model
-   */
-  static async repairJSON(badJSON: string) {
-    try {
-      const repairClient = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      });
-
-      const repair = await repairClient.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
-          {
-            role: "system",
-            content: "Fix the following broken JSON and return ONLY repaired JSON.",
-          },
-          {
-            role: "user",
-            content: badJSON,
-          },
-        ],
-        temperature: 0,
-      });
-
-      const output = repair.choices?.[0]?.message?.content;
-      if (!output) {
-        return { success: false };
-      }
-
       return {
-        success: true,
-        json: JSON.parse(output),
+        error: err?.message ?? "Unknown error in BuilderEngine.run()",
       };
-    } catch {
-      return { success: false };
     }
   }
 }
