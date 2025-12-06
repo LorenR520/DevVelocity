@@ -1,165 +1,118 @@
 // server/ai/upgrade-engine.ts
 
 /**
- * DevVelocity Upgrade Engine
- * ------------------------------------------------------------
- * Determines whether an AI-generated architecture exceeds
- * the user's subscription tier and suggests upgrades.
+ * DevVelocity AI — Upgrade Engine
+ * --------------------------------------------------------
+ * Used when:
+ *  ✓ A user requests "Upgrade Existing File"
+ *  ✓ AI Builder Router detects outdated fields
+ *  ✓ A plan exceeds its permitted capabilities
  *
- * Works with:
- *  - marketing/pricing.json
- *  - builder-engine.ts
- *  - builder-router.ts
+ * Responsibilities:
+ *  ✓ Compare architecture JSON to latest schema
+ *  ✓ Suggest upgrades
+ *  ✓ Block upgrades requiring a higher tier
+ *  ✓ Produce a new JSON file aligned to 2025 DX standards
  */
 
-import pricingData from "@/marketing/pricing.json";
+import OpenAI from "openai";
+import { buildUpgradePrompt } from "@/server/ai/prompt";
+import { getPlan } from "@/ai-builder/plan-logic";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
 
 export class UpgradeEngine {
   /**
-   * Compare generated AI output against plan limits
+   * Evaluate whether the output exceeds plan limits
+   * Called inside builder-router.ts
    */
   static async evaluate(aiOutput: any, planId: string) {
-    if (!aiOutput || typeof aiOutput !== "object") {
-      return { needsUpgrade: false };
+    const plan = getPlan(planId);
+    if (!plan) return { needsUpgrade: false };
+
+    const features = aiOutput?.features ?? {};
+
+    // Example rules — these prevent lower-tier users
+    // from generating enterprise-level infra
+    const violations = [];
+
+    // If user is on Startup but AI generated multi-cloud
+    if (features.multiCloud && planId === "developer") {
+      violations.push("Multi-cloud orchestration requires Startup tier.");
     }
 
-    const plan = pricingData.plans.find((p) => p.id === planId);
+    if (features.multiCloud && planId === "startup") {
+      violations.push("Multi-cloud orchestration requires Team tier.");
+    }
 
-    if (!plan) {
+    if (features.multiCloudFailover && planId !== "enterprise") {
+      violations.push("AI Auto-Failover requires Enterprise tier.");
+    }
+
+    if (violations.length > 0) {
+      const recommendedPlan =
+        planId === "developer"
+          ? "startup"
+          : planId === "startup"
+          ? "team"
+          : "enterprise";
+
       return {
         needsUpgrade: true,
-        message: "Invalid plan detected. Please upgrade.",
-        recommendedPlan: "startup",
+        message: violations.join(" "),
+        recommendedPlan,
       };
     }
 
-    const architecture = aiOutput.architecture ?? {};
-
-    // ------------------------------------------------------------
-    // 1. Provider Count Check
-    // ------------------------------------------------------------
-    const usedProviders = Object.keys(architecture.providers ?? {});
-    const providerCount = usedProviders.length;
-
-    const allowedProviders =
-      typeof plan.providers === "number" ? plan.providers : Infinity;
-
-    if (providerCount > allowedProviders) {
-      return {
-        needsUpgrade: true,
-        message: `Your architecture uses ${providerCount} cloud providers, but your plan allows only ${allowedProviders}.`,
-        recommendedPlan: UpgradeEngine.nextPlan(planId),
-      };
-    }
-
-    // ------------------------------------------------------------
-    // 2. Feature Check (SSO, autoscale, enterprise auth, etc.)
-    // ------------------------------------------------------------
-    const requiredFeatures = architecture.features ?? [];
-
-    const planFeatures = plan.automation ?? {};
-
-    // Special checks
-    const featureViolations = [];
-
-    // Autoscaling
-    if (requiredFeatures.includes("autoscale")) {
-      if (planFeatures.scaling !== "autoscale" && planId !== "enterprise") {
-        featureViolations.push("autoscale");
-      }
-    }
-
-    // Blue/Green Deployments
-    if (requiredFeatures.includes("blue_green")) {
-      if (
-        planFeatures.deployment_safety !== "blue_green" &&
-        planId !== "enterprise"
-      ) {
-        featureViolations.push("blue_green");
-      }
-    }
-
-    // Enterprise SSO
-    if (requiredFeatures.includes("enterprise_sso")) {
-      if (plan.sso !== "enterprise" && planId !== "enterprise") {
-        featureViolations.push("enterprise_sso");
-      }
-    }
-
-    if (featureViolations.length > 0) {
-      return {
-        needsUpgrade: true,
-        message:
-          `Your architecture requires features not included in your plan: ${featureViolations.join(
-            ", "
-          )}.`,
-        recommendedPlan: UpgradeEngine.nextPlan(planId),
-      };
-    }
-
-    // ------------------------------------------------------------
-    // 3. Build Minutes (AI estimated workload)
-    // ------------------------------------------------------------
-    if (aiOutput.estimated_build_minutes) {
-      const required = aiOutput.estimated_build_minutes;
-      const allowed = plan.limits?.build_minutes ?? Infinity;
-
-      if (typeof allowed === "number" && required > allowed) {
-        return {
-          needsUpgrade: true,
-          message: `The generated infrastructure requires ~${required} build minutes, exceeding your plan's limit of ${allowed}.`,
-          recommendedPlan: UpgradeEngine.nextPlan(planId),
-        };
-      }
-    }
-
-    // ------------------------------------------------------------
-    // 4. API Calls (if AI estimates usage)
-    // ------------------------------------------------------------
-    if (aiOutput.estimated_api_calls) {
-      const required = aiOutput.estimated_api_calls;
-      const allowed = plan.limits?.api_calls ?? Infinity;
-
-      if (typeof allowed === "number" && required > allowed) {
-        return {
-          needsUpgrade: true,
-          message: `Your architecture is projected to use ~${required} API calls, but your plan allows ${allowed}.`,
-          recommendedPlan: UpgradeEngine.nextPlan(planId),
-        };
-      }
-    }
-
-    // ------------------------------------------------------------
-    // 5. Pipelines
-    // ------------------------------------------------------------
-    if (aiOutput.estimated_pipelines) {
-      const required = aiOutput.estimated_pipelines;
-      const allowed = plan.limits?.pipelines ?? Infinity;
-
-      if (typeof allowed === "number" && required > allowed) {
-        return {
-          needsUpgrade: true,
-          message: `Your architecture needs ${required} automated pipelines, exceeding your plan limit of ${allowed}.`,
-          recommendedPlan: UpgradeEngine.nextPlan(planId),
-        };
-      }
-    }
-
-    // ------------------------------------------------------------
-    // PASSED — No violations
-    // ------------------------------------------------------------
-    return {
-      needsUpgrade: false,
-    };
+    return { needsUpgrade: false };
   }
 
   /**
-   * Returns the next plan in the chain.
+   * Upgrade an existing DevVelocity architecture file
    */
-  static nextPlan(planId: string) {
-    if (planId === "developer") return "startup";
-    if (planId === "startup") return "team";
-    if (planId === "team") return "enterprise";
-    return "enterprise";
+  static async runUpgrade(existingFile: any, planId: string) {
+    try {
+      const prompt = buildUpgradePrompt(existingFile, planId);
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.1-pro",
+        temperature: 0.2,
+        messages: [
+          {
+            role: "system",
+            content: prompt,
+          },
+        ],
+        max_tokens: 6000,
+      });
+
+      const raw = response.choices?.[0]?.message?.content;
+
+      if (!raw) {
+        return { error: "Upgrade engine returned no output." };
+      }
+
+      // Attempt to parse upgraded JSON
+      try {
+        const upgraded = JSON.parse(raw);
+
+        return {
+          upgraded,
+          message: "Upgrade completed successfully.",
+        };
+      } catch (err) {
+        return {
+          error: "Failed to parse JSON upgrade output.",
+          raw,
+        };
+      }
+    } catch (err: any) {
+      console.error("Upgrade Engine Error:", err);
+      return {
+        error: err.message ?? "Unknown upgrade engine failure.",
+      };
+    }
   }
 }
