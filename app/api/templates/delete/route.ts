@@ -1,11 +1,11 @@
-// app/api/templates/delete/route.ts
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * DELETE TEMPLATE (SOFT DELETE)
- * ----------------------------------------------------------
+ * DELETE TEMPLATE (Soft Delete)
+ * ---------------------------------------------------------
+ * POST /api/templates/delete
+ *
  * Inputs:
  *  {
  *    templateId: string,
@@ -15,20 +15,19 @@ import { createClient } from "@supabase/supabase-js";
  *  }
  *
  * Behavior:
- *  - Developer → ❌ blocked (no template editing)
- *  - Startup / Team / Enterprise → allowed
+ *  - Developer → can delete ONLY "base" templates
+ *  - Startup → can delete base + provider templates
+ *  - Team → can delete base + provider + advanced
+ *  - Enterprise → can delete anything
+ *
  *  - Soft delete only (deleted_at timestamp)
- *  - Template remains restorable
- *  - Logs deletion as non-billable usage event
+ *  - Version history remains intact
  */
 
 export async function POST(req: Request) {
   try {
     const { templateId, orgId, plan, userId } = await req.json();
 
-    // --------------------------------------------------
-    // Validate required fields
-    // --------------------------------------------------
     if (!templateId || !orgId || !userId) {
       return NextResponse.json(
         { error: "Missing templateId, orgId, or userId" },
@@ -36,45 +35,57 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Developer plan → blocked
-    // --------------------------------------------------
-    if (plan === "developer") {
+    // ------------------------------
+    // PLAN RULES
+    // ------------------------------
+    const allowedCategories: Record<string, string[]> = {
+      developer: ["base"],
+      startup: ["base", "provider"],
+      team: ["base", "provider", "advanced"],
+      enterprise: ["base", "provider", "advanced", "enterprise"],
+    };
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // ------------------------------
+    // 1. Load template
+    // ------------------------------
+    const { data: template, error: loadErr } = await supabase
+      .from("templates")
+      .select("id, org_id, category, name")
+      .eq("id", templateId)
+      .eq("org_id", orgId)
+      .single();
+
+    if (loadErr || !template) {
+      return NextResponse.json(
+        { error: "Template not found or access denied" },
+        { status: 404 }
+      );
+    }
+
+    // ------------------------------
+    // 2. Permission check
+    // ------------------------------
+    const permitted = allowedCategories[plan];
+
+    if (!permitted.includes(template.category)) {
       return NextResponse.json(
         {
-          error: "Upgrade required to delete templates.",
+          error: `Your ${plan} plan cannot delete templates in category "${template.category}"`,
+          allowed_categories: permitted,
           upgrade_required: true,
         },
         { status: 403 }
       );
     }
 
-    // --------------------------------------------------
-    // Supabase (service role)
-    // --------------------------------------------------
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    // --------------------------------------------------
-    // Verify template exists + belongs to org
-    // --------------------------------------------------
-    const { data: template, error: templateErr } = await supabase
-      .from("templates")
-      .select("*")
-      .eq("id", templateId)
-      .eq("org_id", orgId)
-      .single();
-
-    if (templateErr || !template) {
-      return NextResponse.json(
-        { error: "Template not found or unauthorized" },
-        { status: 404 }
-      );
-    }
-
+    // ------------------------------
     // Already deleted?
+    // ------------------------------
     if (template.deleted_at) {
       return NextResponse.json(
         { error: "Template already deleted" },
@@ -82,17 +93,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Soft delete template
-    // --------------------------------------------------
+    // ------------------------------
+    // 3. Soft delete template
+    // ------------------------------
     const { error: deleteErr } = await supabase
       .from("templates")
       .update({
         deleted_at: new Date().toISOString(),
-        last_modified_by: userId,
+        deleted_by: userId,
       })
-      .eq("id", templateId)
-      .eq("org_id", orgId);
+      .eq("id", templateId);
 
     if (deleteErr) {
       return NextResponse.json(
@@ -101,21 +111,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // --------------------------------------------------
-    // Log deletion (non-billable event)
-    // --------------------------------------------------
+    // ------------------------------
+    // 4. Log deletion
+    // ------------------------------
     await supabase.from("usage_logs").insert({
       org_id: orgId,
-      pipelines_run: 0,
-      provider_api_calls: 0,
-      build_minutes: 0,
       deleted_templates: 1,
       date: new Date().toISOString(),
     });
 
     return NextResponse.json({
       success: true,
-      message: "Template deleted successfully (soft deleted).",
+      message: `Template "${template.name}" deleted successfully.`,
     });
   } catch (err: any) {
     console.error("Template delete error:", err);
