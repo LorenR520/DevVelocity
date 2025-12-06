@@ -4,21 +4,27 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * GET ORG USAGE LOGS
- * ------------------------------------------------------
+ * USAGE SUMMARY API
+ * -------------------------------------------------------
+ * Returns all metered consumption for an organization.
+ *
+ * Inputs:
+ *  {
+ *    orgId: string,
+ *    plan: string
+ *  }
+ *
+ * Rules:
+ *  - Developer → ❌ Cannot access usage dashboard
+ *  - Startup / Team / Enterprise → full access
+ *
  * Returns:
- * - Daily usage logs
- * - Monthly totals
- * - Tier-specific limits
- * - Upgrade recommendations
- *
- * Visible to:
- * - Startup
- * - Team
- * - Enterprise
- *
- * Hidden from:
- * - Developer (returns upgrade notice)
+ *  - total pipelines run
+ *  - total provider API calls
+ *  - total build minutes
+ *  - deleted/restored file counts
+ *  - template generation counts
+ *  - monthly + daily usage summary
  */
 
 export async function POST(req: Request) {
@@ -32,120 +38,76 @@ export async function POST(req: Request) {
       );
     }
 
-    // Developer tier cannot view usage history
+    // Developer plan cannot access usage analytics
     if (plan === "developer") {
-      return NextResponse.json({
-        usage: [],
-        totals: {},
-        upgrade_required: true,
-        message:
-          "Upgrade to Startup, Team, or Enterprise to unlock usage analytics.",
-      });
+      return NextResponse.json(
+        {
+          upgrade_required: true,
+          message: "Upgrade required to view detailed usage analytics.",
+          usage: null,
+        },
+        { status: 403 }
+      );
     }
 
-    // ------------------------------
-    // Supabase Admin Client
-    // ------------------------------
+    // -------------------------------------------------------
+    // Supabase (service role required for summarizing usage)
+    // -------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // ------------------------------
-    // 1. Fetch Raw Logs
-    // ------------------------------
+    // -------------------------------------------------------
+    // Load ALL usage logs for org
+    // -------------------------------------------------------
     const { data: logs, error: logsErr } = await supabase
       .from("usage_logs")
-      .select(`
-        id,
-        org_id,
-        date,
-        pipelines_run,
-        provider_api_calls,
-        build_minutes
-      `)
+      .select("*")
       .eq("org_id", orgId)
       .order("date", { ascending: false });
 
     if (logsErr) {
+      console.error("Usage get error:", logsErr);
       return NextResponse.json(
-        { error: "Unable to load usage logs" },
+        { error: "Failed to load usage logs" },
         { status: 500 }
       );
     }
 
-    // ------------------------------
-    // 2. Calculate Totals
-    // ------------------------------
-    const totals = logs.reduce(
-      (acc, row) => {
-        acc.pipelines_run += row.pipelines_run ?? 0;
-        acc.provider_api_calls += row.provider_api_calls ?? 0;
-        acc.build_minutes += row.build_minutes ?? 0;
-        return acc;
-      },
-      {
-        pipelines_run: 0,
-        provider_api_calls: 0,
-        build_minutes: 0,
-      }
-    );
-
-    // ------------------------------
-    // 3. Apply Tier Rules
-    // ------------------------------
-    const tierLimits: Record<string, any> = {
-      startup: {
-        max_build_minutes: 500,
-        max_pipelines: 100,
-        max_provider_calls: 1000,
-      },
-      team: {
-        max_build_minutes: 2000,
-        max_pipelines: 500,
-        max_provider_calls: 5000,
-      },
-      enterprise: {
-        max_build_minutes: Infinity,
-        max_pipelines: Infinity,
-        max_provider_calls: Infinity,
-      },
+    // -------------------------------------------------------
+    // Aggregate totals
+    // -------------------------------------------------------
+    const totals = {
+      pipelines_run: 0,
+      provider_api_calls: 0,
+      build_minutes: 0,
+      deleted_files: 0,
+      restored_files: 0,
+      templates_generated: 0,
     };
 
-    const limits = tierLimits[plan] ?? tierLimits["startup"];
+    logs.forEach((log) => {
+      totals.pipelines_run += log.pipelines_run ?? 0;
+      totals.provider_api_calls += log.provider_api_calls ?? 0;
+      totals.build_minutes += log.build_minutes ?? 0;
+      totals.deleted_files += log.deleted_files ?? 0;
+      totals.restored_files += log.restored_files ?? 0;
+      totals.templates_generated += log.templates_generated ?? 0;
+    });
 
-    // ------------------------------
-    // 4. Upgrade Recommendation Engine
-    // ------------------------------
-    const recommendations: string[] = [];
-
-    if (totals.pipelines_run >= limits.max_pipelines * 0.9) {
-      recommendations.push(
-        "You're approaching your monthly pipeline limit — consider upgrading."
-      );
-    }
-
-    if (totals.build_minutes >= limits.max_build_minutes * 0.9) {
-      recommendations.push(
-        "Build minutes usage is near the limit. Upgrade recommended."
-      );
-    }
-
-    if (totals.provider_api_calls >= limits.max_provider_calls * 0.9) {
-      recommendations.push(
-        "API call volume is nearing its cap. Team tier may be more suitable."
-      );
-    }
-
+    // -------------------------------------------------------
+    // Return full structured usage summary
+    // -------------------------------------------------------
     return NextResponse.json({
-      usage: logs,
+      success: true,
+      plan,
+      orgId,
       totals,
-      limits,
-      recommendations,
-      upgrade_required: false,
+      logs: logs ?? [],
     });
   } catch (err: any) {
-    console.error("Usage get error:", err);
+    console.error("Usage API error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
