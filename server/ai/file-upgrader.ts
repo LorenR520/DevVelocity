@@ -1,74 +1,101 @@
-// server/ai/file-upgrader.ts
 /**
- * DevVelocity AI — Architecture File Upgrader (Production Ready)
- * ----------------------------------------------------------------
- * Responsibilities:
- *  ✓ Read old JSON architecture file
- *  ✓ Normalize + modernize structure
- *  ✓ Apply changes based on the user's plan tier
- *  ✓ Ensure output complies with DevVelocity’s 2025 standard schema
- *  ✓ Return upgraded JSON safely (NEVER breaks the UI)
+ * DevVelocity — Architecture File Upgrader
+ * --------------------------------------------------------
+ * Takes an existing saved architecture JSON and:
+ *  ✓ Normalizes outdated fields
+ *  ✓ Upgrades to new schema format
+ *  ✓ Removes deprecated keys
+ *  ✓ Adds missing required fields
+ *  ✓ Ensures plan-tier compatibility
+ *  ✓ Suggests upgrade if output exceeds plan limits
+ *
+ * Powered by GPT-5.1-Pro with strict JSON return format.
  */
 
 import OpenAI from "openai";
-import { buildUpgradePrompt } from "./prompt";  // FIXED CLEAN PATHING
+import { getPlan } from "@/ai-builder/plan-logic";
+import { buildUpgradePrompt } from "@/ai-builder/prompt";
+import { UpgradeEngine } from "./upgrade-engine";
 
-// Initialize GPT-5.1 client
-const client = new OpenAI({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-export async function upgradeArchitectureFile(oldFile: any, plan: string) {
+export async function upgradeArchitectureFile(oldFile: any, planId: string) {
   try {
-    // -----------------------------------------------------
-    // 1. Build the upgrade prompt (plan-aware)
-    // -----------------------------------------------------
-    const prompt = buildUpgradePrompt(oldFile, plan);
-
-    // -----------------------------------------------------
-    // 2. GPT-5.1 request (new Responses API)
-    // -----------------------------------------------------
-    const response = await client.responses.create({
-      model: "gpt-5.1", // GPT-5.1 is your default AI engine
-      input: prompt,
-      max_output_tokens: 6000,
-      temperature: 0.2,
-      reasoning: { effort: "medium" },
-    });
-
-    const output = response.output_text;
-
-    if (!output) {
-      return { error: "No AI output was generated." };
-    }
-
-    // -----------------------------------------------------
-    // 3. Attempt to parse returned JSON safely
-    // -----------------------------------------------------
-    let parsed;
-
-    try {
-      parsed = JSON.parse(output);
-    } catch (err) {
-      // Force the UI to stay operational
+    const plan = getPlan(planId);
+    if (!plan) {
       return {
-        error: "Failed to parse upgraded JSON.",
-        raw: output,
+        error: "Invalid plan ID",
+        suggestedPlan: "startup",
       };
     }
 
-    // -----------------------------------------------------
-    // 4. SUCCESS — Upgraded architecture file
-    // -----------------------------------------------------
+    // --------------------------------------------------------
+    // 1. Build AI prompt for upgrade
+    // --------------------------------------------------------
+    const prompt = buildUpgradePrompt(oldFile, planId);
+
+    // --------------------------------------------------------
+    // 2. GPT-5.1-Pro — JSON-only structured response
+    // --------------------------------------------------------
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.1-pro",
+      temperature: 0.15,
+      max_tokens: 8000,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are DevVelocity's automated architecture normalizer. " +
+            "Always return ONLY valid JSON. No text. No commentary.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const rawOutput =
+      response.choices?.[0]?.message?.content ?? "{}";
+
+    let upgraded;
+    try {
+      upgraded = JSON.parse(rawOutput);
+    } catch (err) {
+      return {
+        error: "AI returned invalid JSON.",
+        raw: rawOutput,
+      };
+    }
+
+    // --------------------------------------------------------
+    // 3. Validate against plan limitations
+    // --------------------------------------------------------
+    const upgradeCheck = await UpgradeEngine.evaluate(upgraded, planId);
+
+    if (upgradeCheck.needsUpgrade) {
+      return {
+        upgraded,
+        needsUpgrade: true,
+        message: upgradeCheck.message,
+        suggestedPlan: upgradeCheck.recommendedPlan,
+      };
+    }
+
+    // --------------------------------------------------------
+    // 4. All good — return upgraded architecture
+    // --------------------------------------------------------
     return {
-      upgraded: parsed,
-      raw: output,
-      message: "Architecture file successfully upgraded.",
+      upgraded,
+      needsUpgrade: false,
     };
   } catch (err: any) {
     console.error("File Upgrader Error:", err);
     return {
-      error: err.message ?? "Unknown file upgrade error",
+      error: err.message ?? "Unknown file upgrade failure.",
     };
   }
 }
