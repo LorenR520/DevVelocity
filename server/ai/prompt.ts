@@ -1,131 +1,145 @@
 // server/ai/prompt.ts
 
 /**
- * DevVelocity AI Prompt Engine
- * ----------------------------------------------------------
- * Generates:
- *  ✓ Builder prompt (new infrastructure generation)
- *  ✓ Upgrade prompt (fix + modernize existing files)
- * 
- * Tier-aware:
- *  - Limits outputs based on plan tier
- *  - Ensures AI respects pricing.json capabilities
+ * DevVelocity AI Prompt System
+ * -------------------------------------------------------
+ * Shared between:
+ *   ✓ Builder Engine (new infra generation)
+ *   ✓ Upgrade Engine (existing file upgrades)
+ *
+ * Ensures:
+ *   ✓ Strict JSON output
+ *   ✓ Tier-aware capabilities
+ *   ✓ Predictable formatting for parsing
  */
 
-import pricingData from "@/marketing/pricing.json";
+import { getPlan } from "@/ai-builder/plan-logic";
 
-/**
- * Get plan details from pricing.json
- */
-function getPlanInfo(planId: string) {
-  return pricingData.plans.find((p) => p.id === planId) ?? null;
-}
-
-/**
- * ----------------------------------------------------------
- * BUILDER PROMPT — generate brand new multi-cloud architectures
- * ----------------------------------------------------------
- */
+/* -----------------------------------------------------
+   1. BUILD PROMPT — For new infrastructure generation
+------------------------------------------------------ */
 export function buildAIPrompt(answers: any) {
   const {
     provider,
-    budget,
     experience,
+    budget,
     environment,
     region,
-    features = [],
+    features,
     plan = "developer",
   } = answers;
 
-  const planInfo = getPlanInfo(plan);
-
-  const allowedProviders =
-    typeof planInfo.providers === "number"
-      ? planInfo.providers
-      : "unlimited";
+  const planMeta = getPlan(plan);
 
   return `
-You are DevVelocity, an autonomous infrastructure architect.
+You are DevVelocity — an autonomous cloud architecture generator.
 
-Your task:
-Generate a complete infrastructure plan based on the user’s answers.
+### GOAL
+Generate a complete infrastructure plan for the user based on their inputs.
 
-User Inputs:
-- Provider: ${provider}
-- Budget: ${budget}
-- Experience: ${experience}
-- Environment: ${environment}
-- Region: ${region}
-- Features: ${features.join(", ") || "none"}
-- Plan Tier: ${plan}
-- Allowed Providers: ${allowedProviders}
+### USER INPUT
+Provider: ${provider}
+Experience Level: ${experience}
+Budget: ${budget}
+Environment: ${environment}
+Region: ${region}
+Features Requested: ${JSON.stringify(features, null, 2)}
 
-Business Rules:
-1. NEVER exceed the user's plan tier.
-2. Provider count MUST NOT exceed: ${allowedProviders}
-3. Forbidden features for this tier:
-   - If tier = developer → no autoscaling, no enterprise SSO, no multi-cloud failover
-   - If tier = startup → no enterprise SSO, no private builders
-   - If tier = team → cannot use enterprise-only compliance or SCIM
-4. Your output must ALWAYS include:
-   {
-     "architecture": {
-       "providers": {
-         "aws" | "azure" | "gcp" | "cloudflare" | ...
-       },
-       "features": [],
-       "services": { ... }
-     },
-     "estimated_build_minutes": number,
-     "estimated_api_calls": number,
-     "estimated_pipelines": number
-   }
+### PLAN TIER
+User Plan: ${planMeta.name}
+Tier Limitations:
+- Max providers: ${planMeta.providers}
+- Auto updates: ${planMeta.updates}
+- Template Builder: ${planMeta.builder}
+- SSO Level: ${planMeta.sso}
+- Build minutes/month: ${planMeta.limits.build_minutes}
+- Pipelines/month: ${planMeta.limits.pipelines}
+- API calls/month: ${planMeta.limits.api_calls}
 
-5. Your output MUST be valid JSON. No commentary.
+### OUTPUT REQUIREMENTS
+Return ONLY valid JSON matching this schema:
 
-6. Output ONLY the JSON — no extra explanations.
-
-Begin now.
-  `;
-}
-
-/**
- * ----------------------------------------------------------
- * UPGRADE PROMPT — clean, modernize, and fix old architecture
- * ----------------------------------------------------------
- */
-export function buildUpgradePrompt(oldFile: any, plan: string) {
-  const planInfo = getPlanInfo(plan);
-
-  const allowedProviders =
-    typeof planInfo.providers === "number"
-      ? planInfo.providers
-      : "unlimited";
-
-  return `
-You are DevVelocity AI — the autonomous upgrade engine.
-
-Your task:
-Upgrade, repair, normalize, and modernize the user's architecture file.
-
-Plan Tier: ${plan}
-Allowed Providers: ${allowedProviders}
-
-Rules:
-1. DO NOT add features beyond the plan tier.
-2. DO NOT introduce multi-cloud if not allowed.
-3. DO NOT enable autoscaling unless the plan includes it.
-4. Remove any deprecated fields.
-5. Ensure compatibility with DevVelocity's 2025 JSON schema.
-
-User File to Upgrade:
-${JSON.stringify(oldFile, null, 2)}
-
-Output Format:
 {
-  "upgraded": { ...clean JSON... }
+  "architecture": {
+    "provider": "aws|azure|gcp|cloudflare|supabase|oracle",
+    "services": [],
+    "deployment": {},
+    "security": {},
+    "networking": {},
+    "scaling": {},
+    "monitoring": {},
+    "cost_optimization": {}
+  },
+  "features": {
+    "multiCloud": boolean,
+    "multiCloudFailover": boolean,
+    "enterpriseSSO": boolean
+  },
+  "exceedsPlan": false
 }
 
-The output MUST be strictly valid JSON with no extra text.
-  `;
+### IMPORTANT RULES
+1. NO commentary, NO markdown, ONLY JSON.
+2. If the user requests features outside their tier:
+   - Set "exceedsPlan": true
+   - Include "features" describing the violations
+3. Use 2025 cloud best practices.
+4. Avoid legacy services.
+5. Produce clean, minimal, predictable JSON.
+
+Generate the architecture JSON now.
+`;
+}
+
+/* -----------------------------------------------------
+   2. UPGRADE PROMPT — For updating old architecture files
+------------------------------------------------------ */
+export function buildUpgradePrompt(existingFile: any, plan: string) {
+  const planMeta = getPlan(plan);
+
+  return `
+You are DevVelocity — an automated infrastructure upgrader.
+
+### GOAL
+Upgrade the user's existing architecture JSON to match the latest
+2025 DevVelocity schema and best practices.
+
+### USER PLAN
+Plan: ${planMeta.name}
+Provider Limit: ${planMeta.providers}
+Builder Level: ${planMeta.builder}
+Compliance: ${planMeta.automation.compliance}
+
+### EXISTING FILE
+${JSON.stringify(existingFile, null, 2)}
+
+### INSTRUCTIONS
+1. Upgrade schemas.
+2. Replace deprecated fields.
+3. Normalize provider-specific structures.
+4. Remove unsupported features based on plan tier.
+5. If the file includes features ABOVE the user's tier:
+   - Preserve the structure but mark them clearly inside
+     "upgradeRecommendations".
+6. DO NOT include explanations. DO NOT include markdown.
+
+### OUTPUT FORMAT
+Return ONLY valid JSON matching this schema:
+
+{
+  "upgraded": {
+    "architecture": { ... },
+    "features": { ... }
+  },
+  "upgradeRecommendations": [],
+  "exceedsPlan": false
+}
+
+### IMPORTANT
+- Never output text outside JSON.
+- Ensure JSON is fully parseable.
+- Use only 2025 DevVelocity-standard fields.
+
+Return the upgraded JSON now.
+`;
 }
