@@ -1,41 +1,98 @@
-/**
- * DevVelocity — AI Prompt Engine
- * ---------------------------------------------------------
- * Generates:
- *   ✓ Builder prompts
- *   ✓ Architecture upgrade prompts
- *   ✓ Provider expansion prompts
- *   ✓ Tier-aware instructions
- *
- * All prompts automatically adapt to the user's plan tier.
- */
-
-import marketing from "@/marketing/pricing.json";
-import { getPlan } from "./plan-logic";
+// server/ai/prompt.ts
 
 /**
- * Build the main AI Builder prompt.
+ * DevVelocity AI — Prompt Generator
+ * -------------------------------------------------------
+ * Generates unified prompts for:
+ *  - AI Builder
+ *  - Upgrade Engine
+ *  - Provider-aware output
+ *  - Budget + Experience tiers
+ *  - Cron-scraped provider metadata
  */
-export function buildAIPrompt(answers: any): string {
-  const plan = getPlan(answers.plan ?? "developer");
+
+import { getPlan } from "@/ai-builder/plan-logic";
+import { loadProviderDocs } from "@/server/providers/loader";
+
+export async function buildAIPrompt(answers: any) {
+  const {
+    provider,
+    budget,
+    experience,
+    environment,
+    region,
+    features,
+    plan: planId = "developer",
+  } = answers;
+
+  const plan = getPlan(planId);
+
+  // Load enriched provider docs (from cron scraper)
+  const providerDocs = await loadProviderDocs(provider);
 
   return `
-You are DevVelocity — an autonomous multi-cloud infrastructure engine.
+You are DevVelocity AI (GPT-5.1-Pro). 
+Generate a complete infrastructure blueprint optimized for:
 
-User Plan: ${plan?.name} (${answers.plan})
-Provider: ${answers.provider}
-Budget: ${answers.budget}
-Experience Level: ${answers.experience}
-Environment: ${answers.environment}
-Region: ${answers.region}
-Features: ${JSON.stringify(answers.features, null, 2)}
+• Provider: ${provider}
+• Region: ${region || "auto-select best"}
+• Environment: ${environment || "production"}
+• Budget level: ${budget}
+• User experience: ${experience}
+• Plan tier: ${plan.name} (${planId})
+• Included features: ${JSON.stringify(features || [])}
 
-Your job:
-1. Generate a full cloud architecture aligned with the customer's plan tier.
-2. Respect the provider limit:
-   - Developer: ${plan?.providers}
-   - Startup: ${plan?.providers}
-   - Team: ${plan?.providers}
-   - Enterprise: unlimited
-3. Respect plan automation capabilities.
-4. Output ONLY a JSON object
+-------------------------
+PLAN LIMITATIONS
+-------------------------
+• Providers allowed: ${plan.providers}
+• Auto-update frequency: ${plan.updates}
+• Builder mode: ${plan.builder}
+• SSO: ${plan.sso}
+• Build minutes: ${plan.limits.build_minutes}
+• Pipelines: ${plan.limits.pipelines}
+• API calls: ${plan.limits.api_calls}
+
+-------------------------
+PROVIDER DOCUMENTATION
+-------------------------
+Use ONLY the capabilities listed below.  
+This includes scraped docs from the cron system:
+
+${providerDocs}
+
+-------------------------
+OUTPUT REQUIREMENTS
+-------------------------
+Return JSON EXACTLY in this shape:
+
+{
+  "infrastructure": {
+    "services": [...],
+    "networking": {...},
+    "security": {...},
+    "compute": {...},
+    "storage": {...},
+    "databases": [...],
+    "ci_cd": {...},
+    "monitoring": {...}
+  },
+  "generated_files": {
+    "cloud_init": "...",
+    "terraform": "...",
+    "dockerfile": "...",
+    "kubernetes": "...",
+    "policy_documents": "..."
+  },
+  "explanations": {
+    "rationale": "...",
+    "tradeoffs": "...",
+    "plan_restrictions": "..."
+  }
+}
+
+Use valid JSON. No markdown. No commentary.
+If requested features exceed the plan tier, describe restrictions
+in "plan_restrictions".
+`;
+}
