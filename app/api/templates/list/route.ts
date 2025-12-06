@@ -2,40 +2,46 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * LIST TEMPLATES
- * --------------------------------------------------------
+ * LIST TEMPLATES FOR TEMPLATE BUILDER
+ * --------------------------------------------------------------
+ * POST /api/templates/list
+ *
  * Inputs:
  *  {
  *    orgId: string,
- *    plan: string
+ *    plan: "developer" | "startup" | "team" | "enterprise"
  *  }
  *
- * Behavior:
- *  - Developer → access only free/default templates
- *  - Startup   → access extended templates
- *  - Team      → access advanced provider templates
- *  - Enterprise → access all + private templates
- *
- *  Template Categories:
- *   - base (always allowed)
- *   - provider (AWS, Azure, GCP, Cloudflare, Supabase…)
- *   - advanced (multi-cloud, ai-infra, pipelines)
- *   - enterprise (private, SOC2-ready, compliance)
+ * Returns:
+ *  - Templates user is allowed to see based on plan category rules
+ *  - Base templates always visible
  */
 
 export async function POST(req: Request) {
   try {
     const { orgId, plan } = await req.json();
 
-    if (!orgId || !plan) {
+    if (!orgId) {
       return NextResponse.json(
-        { error: "Missing orgId or plan" },
+        { error: "Missing orgId" },
         { status: 400 }
       );
     }
 
     // --------------------------------------------------------
-    // Supabase Admin Client
+    // PERMISSIONS PER PLAN
+    // --------------------------------------------------------
+    const allowedCategories: Record<string, string[]> = {
+      developer: ["base"],
+      startup: ["base", "provider"],
+      team: ["base", "provider", "advanced"],
+      enterprise: ["base", "provider", "advanced", "enterprise"],
+    };
+
+    const categories = allowedCategories[plan] ?? ["base"];
+
+    // --------------------------------------------------------
+    // Supabase Client (service role to allow org-wide visibility)
     // --------------------------------------------------------
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,21 +49,7 @@ export async function POST(req: Request) {
     );
 
     // --------------------------------------------------------
-    // Build template access rules
-    // --------------------------------------------------------
-    const accessLevels = {
-      developer: ["base"], // minimal
-      startup: ["base", "provider"],
-      team: ["base", "provider", "advanced"],
-      enterprise: ["base", "provider", "advanced", "enterprise"],
-    };
-
-    const allowedCategories =
-      accessLevels[plan as keyof typeof accessLevels] ??
-      ["base"];
-
-    // --------------------------------------------------------
-    // Fetch templates by allowed category list
+    // Fetch templates based on allowed categories
     // --------------------------------------------------------
     const { data: templates, error } = await supabase
       .from("templates")
@@ -65,19 +57,24 @@ export async function POST(req: Request) {
         `
         id,
         name,
-        category,
         description,
+        category,
         provider,
+        org_id,
+        created_at,
         updated_at
-      `
+        `
       )
-      .in("category", allowedCategories)
-      .order("updated_at", { ascending: false });
+      .eq("org_id", orgId)
+      .in("category", categories)
+      .is("deleted_at", null)
+      .order("category", { ascending: true })
+      .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("Template fetch error:", error);
+      console.error("Template list error:", error);
       return NextResponse.json(
-        { error: "Failed to load templates" },
+        { error: "Failed to fetch templates" },
         { status: 500 }
       );
     }
@@ -85,11 +82,12 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       plan,
-      allowed_categories: allowedCategories,
+      allowed_categories: categories,
       templates: templates ?? [],
     });
+
   } catch (err: any) {
-    console.error("Template list API error:", err);
+    console.error("Templates LIST error:", err);
     return NextResponse.json(
       { error: err.message ?? "Internal server error" },
       { status: 500 }
