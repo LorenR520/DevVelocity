@@ -2,6 +2,13 @@ import pricingData from "../../../marketing/pricing.json";
 
 export const dynamic = "force-static";
 
+const builderLabels: Record<string, string> = {
+  basic: "Standard Builder",
+  advanced: "Multi-Cloud Builder",
+  enterprise: "Enterprise Builder",
+  private: "Private AI Builder",
+};
+
 export default function PricingPage() {
   const plans = pricingData.plans;
 
@@ -9,7 +16,7 @@ export default function PricingPage() {
     <main className="max-w-6xl mx-auto px-6 py-20 text-white">
       <h1 className="text-4xl font-bold text-center mb-6">Pricing</h1>
       <p className="text-gray-300 text-center mb-12">
-        Fully autonomous multi-cloud builds. No maintenance. No support calls.  
+        Fully autonomous multi-cloud builds. No maintenance. No support calls.
         Just pure automation.
       </p>
 
@@ -22,12 +29,19 @@ export default function PricingPage() {
               className="p-6 bg-neutral-900 rounded-xl border border-neutral-800"
             >
               <h2 className="text-2xl font-semibold mb-2">{plan.name}</h2>
-              <p className="text-4xl font-bold mb-6">${plan.price}</p>
+
+              {/* Use marketing display price */}
+              <p className="text-4xl font-bold mb-6">
+                {plan.display_price}
+              </p>
 
               <ul className="space-y-2 text-gray-300 mb-6">
                 <li>✔ {plan.providers} Cloud Providers</li>
                 <li>✔ {plan.updates} Auto-Updates</li>
-                <li>✔ Template Builder: {plan.builder}</li>
+
+                {/* Human-friendly builder description */}
+                <li>✔ Builder: {builderLabels[plan.builder] ?? plan.builder}</li>
+
                 <li>✔ SSO Level: {plan.sso}</li>
               </ul>
 
@@ -43,7 +57,11 @@ export default function PricingPage() {
         {/* Enterprise Plan */}
         <div className="p-6 bg-neutral-900 rounded-xl border border-neutral-800 md:col-span-3">
           <h2 className="text-2xl font-semibold mb-2">Enterprise</h2>
-          <p className="text-4xl font-bold mb-6">Starting at $1,250/mo</p>
+
+          {/* Pull price dynamically */}
+          <p className="text-4xl font-bold mb-6">
+            {pricingData.plans.find((p) => p.id === "enterprise")?.display_price}
+          </p>
 
           <ul className="space-y-2 text-gray-300 mb-6">
             <li>✔ Unlimited Providers</li>
