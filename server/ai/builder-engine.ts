@@ -2,89 +2,88 @@
 
 /**
  * DevVelocity AI — Builder Engine
- * --------------------------------------------------------
+ * ---------------------------------------------------------
  * Responsibilities:
- *  ✓ Call GPT-5.1-Pro with builder prompt
- *  ✓ Validate JSON output
- *  ✓ Retry malformed responses
- *  ✓ Return clean architecture for UI + file storage
+ *  ✓ Accepts a fully built prompt
+ *  ✓ Calls GPT-5.1-Pro safely
+ *  ✓ Forces structured JSON output
+ *  ✓ Attempts recovery if model returns invalid JSON
+ *  ✓ Returns final normalized builder object
  */
 
 import OpenAI from "openai";
-import { AICreditTracking } from "./credit-tracking";
+
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("⚠️ Missing OPENAI_API_KEY — AI Builder will not function.");
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// Maximum retry attempts for malformed JSON responses
-const MAX_RETRIES = 3;
+/**
+ * Normalize whitespace and invisible characters that cause JSON parsing issues
+ */
+function cleanJSON(str: string) {
+  return str
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .replace(/\u0000/g, "")
+    .trim();
+}
 
 export class BuilderEngine {
   /**
-   * Run the AI Builder with retry logic + JSON validation
+   * Execute the AI build generation
    */
-  static async run(prompt: string) {
-    let attempt = 0;
+  static async run(
+    openaiClient: OpenAI,
+    prompt: string
+  ): Promise<any> {
+    try {
+      const response = await openaiClient.chat.completions.create({
+        model: "gpt-5.1-pro",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are DevVelocity AI — output MUST be valid JSON. No commentary.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 8000,
+        response_format: { type: "json_object" }, // Force JSON
+      });
 
-    while (attempt < MAX_RETRIES) {
-      try {
-        const response = await openai.chat.completions.create({
-          model: "gpt-5.1-pro",
-          temperature: 0.2,
-          messages: [
-            {
-              role: "system",
-              content: prompt,
-            },
-          ],
-          max_tokens: 8000,
-        });
+      const content = response.choices?.[0]?.message?.content;
 
-        const raw = response.choices?.[0]?.message?.content ?? "";
-
-        // Track token usage + billing
-        const inputTokens = response.usage?.prompt_tokens ?? 0;
-        const outputTokens = response.usage?.completion_tokens ?? 0;
-
-        await BuilderEngine.trackCredits(inputTokens, outputTokens);
-
-        // Attempt to parse JSON
-        try {
-          const parsed = JSON.parse(raw);
-
-          if (typeof parsed !== "object" || Array.isArray(parsed)) {
-            throw new Error("Invalid JSON: Expected object at root");
-          }
-
-          // Successful output
-          return parsed;
-        } catch (parseErr) {
-          console.warn(`JSON parse error (attempt ${attempt + 1}):`, parseErr);
-        }
-      } catch (err) {
-        console.error("GPT-5.1-Pro Builder Failure:", err);
+      if (!content) {
+        return { error: "AI returned no content." };
       }
 
-      attempt++;
-    }
+      const cleaned = cleanJSON(content);
 
-    return {
-      error:
-        "AI Builder failed to return valid JSON after multiple attempts. Please retry or adjust inputs.",
-    };
-  }
+      try {
+        // Attempt JSON parse
+        const parsed = JSON.parse(cleaned);
+        return { success: true, ...parsed };
+      } catch (err) {
+        console.error("JSON Parse Error:", err);
+        return {
+          error: "AI returned invalid JSON.",
+          raw: cleaned,
+        };
+      }
+    } catch (err: any) {
+      console.error("AI Builder Engine Error:", err);
 
-  /**
-   * Track billing usage + AI token cost
-   */
-  private static async trackCredits(inputTokens: number, outputTokens: number) {
-    try {
-      // No orgId or planId needed here — it's assigned in the router
-      // This method is only invoked downward by AIBuilderRouter with context
-      // Credit tracking is connected at router layer, not engine layer
-    } catch (err) {
-      console.warn("Credit tracking error:", err);
+      return {
+        error: err?.message ?? "Unknown AI Builder Error",
+      };
     }
   }
 }
