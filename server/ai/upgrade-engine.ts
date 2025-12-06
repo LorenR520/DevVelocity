@@ -1,132 +1,117 @@
-import OpenAI from "openai";
-import { buildAIPrompt } from "@/ai-builder/prompt";
+// server/ai/upgrade-engine.ts
 
 /**
- * DevVelocity File Upgrade Engine
+ * DevVelocity — AI Upgrade Evaluation Engine
+ * ---------------------------------------------------------
+ * Determines:
+ *  ✓ Whether AI output exceeds customer's tier
+ *  ✓ What features require a higher plan
+ *  ✓ Which plan to recommend next
  *
- * This engine reads a *pasted old file*, analyzes it,
- * determines what components are outdated, and regenerates
- * an updated version using GPT-5.1-Pro.
- *
- * It enforces plan limitations and includes upgrade hints.
+ * Works with paid tiers:
+ *  - developer ($39)
+ *  - startup ($99)
+ *  - team ($299)
+ *  - enterprise ($1250+)
  */
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+import pricing from "../../marketing/pricing.json";
 
-export async function runUpgradeEngine(params: {
-  originalFile: string;
-  plan: string;
-}) {
-  const { originalFile, plan } = params;
+type PlanId = "developer" | "startup" | "team" | "enterprise";
 
-  // ---------------------------
-  // 🧠 Parse Old File JSON Safely
-  // ---------------------------
-  let parsedInput: any = null;
+const PLAN_ORDER: PlanId[] = ["developer", "startup", "team", "enterprise"];
 
-  try {
-    parsedInput = JSON.parse(originalFile);
-  } catch {
-    parsedInput = {
-      error: "Could not parse old file. Treating input as raw text.",
-      raw: originalFile,
-    };
-  }
+export class UpgradeEngine {
+  /**
+   * Evaluate AI Builder Output Against Plan Limits
+   */
+  static async evaluate(aiOutput: any, planId: PlanId) {
+    if (!aiOutput) {
+      return { needsUpgrade: false };
+    }
 
-  // ---------------------------
-  // 🧠 Create System Prompt
-  // ---------------------------
-  const systemPrompt = `
-You are DevVelocity AI — GPT-5.1-Pro Edition.
-Your job is to *upgrade old DevVelocity AI Builder output files*.
-
-### Your responsibilities:
-1. Identify outdated items in:
-   - architecture
-   - cloud-init
-   - docker-compose
-   - pipelines
-   - security model
-   - budget
-   - maintenance plan
-2. Apply DevVelocity plan limits:
-   - provider caps
-   - automation caps
-   - security caps
-   - SSO caps
-   - builder tier limits
-3. Suggest specific upgrade paths if limits are exceeded.
-4. Preserve intent while modernizing the build.
-5. Rewrite EVERYTHING using the latest DevVelocity AI standard.
-
-### Input File:
-${JSON.stringify(parsedInput, null, 2)}
-
-### Plan Tier:
-${plan}
-
-### Output Requirements:
-Respond ONLY with valid JSON:
-
-{
-  "summary": "...",
-  "architecture": "...",
-  "cloud_init": "...",
-  "docker_compose": "...",
-  "pipelines": { ... },
-  "maintenance_plan": "...",
-  "sso_recommendations": "...",
-  "security_model": "...",
-  "budget_projection": "...",
-  "upgrade_paths": "...",
-  "next_steps": "..."
-}
-
-### Rules:
-- NEVER output placeholders.
-- ALWAYS modernize the output.
-- ALWAYS enforce plan limits.
-- ALWAYS give upgrade suggestions when needed.
-- ALWAYS produce runnable cloud-init + docker-compose.
-- ALWAYS validate JSON correctness.
-`;
-
-
-  // ---------------------------
-  // 🧠 Run GPT-5.1-Pro
-  // ---------------------------
-  try {
-    const completion = await client.chat.completions.create({
-      model: "gpt-5.1-pro",
-      temperature: 0.1,
-      max_tokens: 6000,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content:
-            "Upgrade this DevVelocity architecture file. Apply all modern recommendations and rebuild the entire output.",
-        },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content || "";
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = {
-        error: "AI did not return valid JSON.",
-        raw,
+    const plan = pricing.plans.find((p) => p.id === planId);
+    if (!plan) {
+      return {
+        needsUpgrade: true,
+        message: "Invalid plan tier assigned. Contact support.",
+        recommendedPlan: "startup",
       };
     }
 
-    return parsed;
-  } catch (err: any) {
-    console.error("runUpgradeEngine error:", err);
-    throw new Error("Upgrade Engine failed.");
+    // -----------------------------------------
+    // Check Provider Count
+    // -----------------------------------------
+    const providersUsed = Array.isArray(aiOutput.providers)
+      ? aiOutput.providers.length
+      : aiOutput.providers?.count ?? 1;
+
+    const allowedProviders =
+      typeof plan.providers === "number"
+        ? plan.providers
+        : Infinity; // enterprise = unlimited
+
+    if (providersUsed > allowedProviders) {
+      const next = UpgradeEngine.nextPlan(planId);
+
+      return {
+        needsUpgrade: true,
+        message: `Your current plan allows ${allowedProviders} providers. This architecture uses ${providersUsed}.`,
+        recommendedPlan: next,
+      };
+    }
+
+    // -----------------------------------------
+    // Check advanced automation features
+    // -----------------------------------------
+    if (aiOutput.features) {
+      const requiresTier = UpgradeEngine.checkFeatureTier(aiOutput.features);
+
+      if (requiresTier && UpgradeEngine.rank(requiresTier) > UpgradeEngine.rank(planId)) {
+        return {
+          needsUpgrade: true,
+          message: `This build uses features available only on the ${requiresTier} tier.`,
+          recommendedPlan: requiresTier,
+        };
+      }
+    }
+
+    // -----------------------------------------
+    // Passed All Checks
+    // -----------------------------------------
+    return {
+      needsUpgrade: false,
+      message: null,
+      recommendedPlan: null,
+    };
+  }
+
+  /**
+   * Determine required tier based on features
+   */
+  static checkFeatureTier(features: any): PlanId | null {
+    const f = JSON.stringify(features).toLowerCase();
+
+    if (f.includes("multi-cloud") || f.includes("failover")) return "enterprise";
+    if (f.includes("autoscale") || f.includes("zero_downtime")) return "team";
+    if (f.includes("scheduled") || f.includes("backup")) return "startup";
+
+    return null;
+  }
+
+  /**
+   * Get the next higher plan
+   */
+  static nextPlan(current: PlanId): PlanId {
+    const i = PLAN_ORDER.indexOf(current);
+    if (i === -1 || i === PLAN_ORDER.length - 1) return "enterprise";
+    return PLAN_ORDER[i + 1];
+  }
+
+  /**
+   * Plan ranking index
+   */
+  static rank(plan: PlanId): number {
+    return PLAN_ORDER.indexOf(plan);
   }
 }
