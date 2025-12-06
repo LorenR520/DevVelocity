@@ -2,17 +2,16 @@
 // ------------------------------------------------------
 //  DevVelocity — AI-Assisted Recommendation Engine
 // ------------------------------------------------------
-//  This module produces lightweight "pre-AI" recommendations
-//  to guide the Builder Engine. It ensures:
+//  Lightweight deterministic engine that produces:
+//    ✓ Provider suggestion
+//    ✓ Architecture compute type
+//    ✓ Database type
+//    ✓ Redundancy level (SLA -> infra template)
+//    ✓ Compliance + security shaping
+//    ✓ Risk factors + advisory notes
 //
-//   ✓ Provider suggestion
-//   ✓ Architecture suggestion
-//   ✓ Database recommendation
-//   ✓ Compliance + security shaping
-//   ✓ Tier-aware limitations
-//
-//  No heavy AI calls here — this is deterministic logic
-//  designed to boost accuracy and stability of GPT-5.1 output.
+//  This stabilizes GPT-5.1 output and ensures consistent,
+//  predictable recommendations no matter the user tier.
 // ------------------------------------------------------
 
 import pricing from "@/marketing/pricing.json";
@@ -59,9 +58,7 @@ export function getRecommendations(input: RecommendationInputs): RecommendationO
   const notes: string[] = [];
   const risks: string[] = [];
 
-  // ------------------------------------------
-  // CLOUD PROVIDER SELECTION
-  // ------------------------------------------
+  // --- PROVIDER SELECTION --------------------------------
   let provider = input.cloudPreference;
 
   if (provider === "auto") {
@@ -69,9 +66,7 @@ export function getRecommendations(input: RecommendationInputs): RecommendationO
     notes.push(`Provider auto-selected based on workload: ${provider}`);
   }
 
-  // ------------------------------------------
-  // REDUNDANCY BASED ON SLA
-  // ------------------------------------------
+  // --- SLA → REDUNDANCY ----------------------------------
   const redundancy = {
     "99.0": "single-zone",
     "99.5": "single-zone + backups",
@@ -80,24 +75,16 @@ export function getRecommendations(input: RecommendationInputs): RecommendationO
     "99.999": "multi-cloud failover",
   }[input.sla];
 
-  // ------------------------------------------
-  // COMPUTE SUGGESTION
-  // ------------------------------------------
+  // --- COMPUTE ENGINE -------------------------------------
   const compute = recommendCompute(provider, input.workloadType, input.experience);
 
-  // ------------------------------------------
-  // DATABASE SUGGESTION
-  // ------------------------------------------
+  // --- DATABASE ENGINE ------------------------------------
   const database = recommendDatabase(provider, input.dbPreference);
 
-  // ------------------------------------------
-  // COMPLIANCE RISK ANALYSIS
-  // ------------------------------------------
+  // --- COMPLIANCE ANALYSIS --------------------------------
   evaluateCompliance(input, risks, notes);
 
-  // ------------------------------------------
-  // LOAD FINAL RESULT
-  // ------------------------------------------
+  // --- FINAL RESULT ---------------------------------------
   return {
     recommendedProvider: provider,
     recommendedCompute: compute,
@@ -152,6 +139,7 @@ function recommendCompute(provider: string, workload: string, exp: string): stri
 
   if (provider === "oracle") return "OCI Functions";
 
+  // fallback
   return "Cloudflare Workers";
 }
 
@@ -185,6 +173,7 @@ function recommendDatabase(provider: string, pref: string): string {
     }
   }
 
+  // Hybrid choice
   return "Hybrid (Supabase SQL + Cloudflare KV)";
 }
 
@@ -196,19 +185,19 @@ function evaluateCompliance(input: RecommendationInputs, risks: string[], notes:
 
   if (compliance.hipaa || compliance.pci) {
     risks.push("Requires high security and encryption standards.");
-    notes.push("Ensure database encryption-at-rest and end-to-end MFA.");
+    notes.push("Ensure database encryption-at-rest and enforced MFA.");
   }
 
   if (compliance.fedramp) {
-    risks.push("FedRAMP workloads must not run on unsupported providers.");
-    notes.push("Only AWS GovCloud or Azure Government permitted.");
+    risks.push("FedRAMP workloads cannot run on general cloud providers.");
+    notes.push("Must use AWS GovCloud or Azure Government only.");
   }
 
   if (expectedUsers > 100000) {
-    risks.push("High user load may require multi-region failover.");
+    risks.push("Large user base may require multi-region failover.");
   }
 
   if (expectedQps > 2000) {
-    risks.push("Throughput may require autoscaling or queueing.");
+    risks.push("High throughput requires autoscaling or queueing.");
   }
 }
