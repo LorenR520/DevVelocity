@@ -1,39 +1,47 @@
 // server/ai/credit-tracking.ts
-
 /**
- * DevVelocity AI — Credit Tracking Engine
- * ------------------------------------------------
+ * DevVelocity AI — Token + Cost Tracking Engine (GPT-5.1 Ready)
+ * ------------------------------------------------------------------
  * Tracks:
- *  ✓ Token usage
- *  ✓ Cost estimates
- *  ✓ Per-plan monthly allowances
- *  ✓ Billing event insertion
- *  ✓ Upgrade recommendations
+ *   ✓ Input + output tokens
+ *   ✓ Cost estimation (GPT-5.1)
+ *   ✓ Monthly usage budget per tier
+ *   ✓ Billing event insertion
+ *   ✓ Upgrade recommendations
+ *
+ * This is the *only* supported and safe
+ * production token-tracking system for DevVelocity.
  */
 
 import { createClient } from "@supabase/supabase-js";
 
-// GPT-5.1-Pro pricing model (approximate)
-const COST_PER_1K_INPUT = 0.005;
-const COST_PER_1K_OUTPUT = 0.015;
+// --------------------------------------------
+// GPT-5.1 Pricing (2025 Realistic)
+// --------------------------------------------
+const PRICE_PER_1K_INPUT = 0.0025;  // $0.0025 per 1,000 input tokens
+const PRICE_PER_1K_OUTPUT = 0.008; // $0.008 per 1,000 output tokens
 
-// Monthly AI token budgets per tier
-const PLAN_BUDGETS = {
-  developer: 50000,     // 50k tokens monthly
-  startup: 250000,      // 250k tokens
-  team: 1000000,        // 1M tokens
-  enterprise: Infinity, // unlimited
+// --------------------------------------------
+// Monthly Token Budgets per Paid Tier
+// --------------------------------------------
+// NOTE: Developer IS PAID — no free tiers
+// --------------------------------------------
+const PLAN_BUDGETS: Record<string, number> = {
+  developer: 150000,   // 150k / month — paid tier, not free
+  startup: 500000,     // 500k / month
+  team: 2000000,       // 2M / month
+  enterprise: Infinity // unlimited
 };
 
 export class AICreditTracking {
   /**
-   * Log usage and check whether the request exceeds plan limits
+   * Record token usage, calculate cost, and determine if upgrade needed.
    */
   static async record({
     orgId,
     planId,
-    inputTokens,
-    outputTokens,
+    inputTokens = 0,
+    outputTokens = 0,
   }: {
     orgId: string;
     planId: string;
@@ -45,18 +53,18 @@ export class AICreditTracking {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const totalTokens = inputTokens + outputTokens;
+    const totalTokens = (inputTokens || 0) + (outputTokens || 0);
 
-    // -----------------------------------------
-    // 💰 Compute cost
-    // -----------------------------------------
+    // --------------------------------------------
+    // 1. Compute Cost Properly for GPT-5.1
+    // --------------------------------------------
     const cost =
-      (inputTokens / 1000) * COST_PER_1K_INPUT +
-      (outputTokens / 1000) * COST_PER_1K_OUTPUT;
+      (inputTokens / 1000) * PRICE_PER_1K_INPUT +
+      (outputTokens / 1000) * PRICE_PER_1K_OUTPUT;
 
-    // -----------------------------------------
-    // 📊 Insert Billing Event
-    // -----------------------------------------
+    // --------------------------------------------
+    // 2. Insert Billing Event
+    // --------------------------------------------
     await supabase.from("billing_events").insert({
       org_id: orgId,
       type: "ai_usage",
@@ -64,25 +72,45 @@ export class AICreditTracking {
       details: {
         inputTokens,
         outputTokens,
-        planId,
+        model: "gpt-5.1",
+        plan: planId,
       },
     });
 
-    // -----------------------------------------
-    // 📚 Track total monthly usage
-    // -----------------------------------------
-    const { data: totalUsage } = await supabase.rpc(
-      "ai_usage_this_month",
-      { p_org_id: orgId }
-    );
+    // --------------------------------------------
+    // 3. Fetch Current Month's Token Usage
+    // --------------------------------------------
+    const { data: tokenRows, error: usageErr } = await supabase
+      .from("billing_events")
+      .select("details")
+      .eq("org_id", orgId)
+      .eq("type", "ai_usage")
+      .gte(
+        "created_at",
+        new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+      );
 
-    const monthlyTokens = totalUsage?.sum ?? 0;
-    const planBudget = PLAN_BUDGETS[planId] ?? 50000;
+    if (usageErr) {
+      console.error("Token aggregation error:", usageErr);
+      return {
+        allowed: true, // fail-open for resilience
+        warning: "Could not verify monthly usage.",
+      };
+    }
 
-    // -----------------------------------------
-    // 🚨 Check if user exceeds allowance
-    // -----------------------------------------
-    if (monthlyTokens > planBudget) {
+    // --------------------------------------------
+    // 4. Aggregate Tokens for Current Month
+    // --------------------------------------------
+    const monthlyTokens = tokenRows
+      .map((row: any) => (row?.details?.inputTokens ?? 0) + (row?.details?.outputTokens ?? 0))
+      .reduce((a: number, b: number) => a + b, 0);
+
+    const monthlyBudget = PLAN_BUDGETS[planId] ?? PLAN_BUDGETS["developer"];
+
+    // --------------------------------------------
+    // 5. Determine If Over Budget
+    // --------------------------------------------
+    if (monthlyTokens > monthlyBudget) {
       const nextPlan =
         planId === "developer"
           ? "startup"
@@ -92,20 +120,22 @@ export class AICreditTracking {
 
       return {
         allowed: false,
-        reason: `Your plan’s monthly AI limit has been exceeded.`,
+        reason: "Your AI monthly token allowance has been exceeded.",
         suggestedPlan: nextPlan,
-        upgradeMessage: `Upgrade to ${nextPlan} for a larger AI token allowance.`,
+        upgradeMessage: `Upgrade to ${nextPlan} for higher AI limits.`,
+        monthlyTokens,
+        monthlyBudget,
       };
     }
 
-    // -----------------------------------------
-    // 👍 Allow the request
-    // -----------------------------------------
+    // --------------------------------------------
+    // 6. All Good — Allow Request
+    // --------------------------------------------
     return {
       allowed: true,
       cost,
       monthlyTokens,
-      planBudget,
+      monthlyBudget,
     };
   }
 }
