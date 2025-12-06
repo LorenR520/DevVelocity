@@ -1,160 +1,122 @@
 /**
- * DevVelocity AI — Upgrade Evaluation Engine
- * ----------------------------------------------------------
- * Purpose:
- *  ✓ Determines if generated infra exceeds plan limits
- *  ✓ Suggests upgrade path (developer → startup → team → enterprise)
- *  ✓ Prevents overuse of provider count, integrations, and features
- *  ✓ Enforces marketing/pricing.json rules
+ * DevVelocity — Upgrade Engine
+ * -----------------------------------------------------------
+ * Evaluates whether an AI-generated architecture exceeds the
+ * user's plan based on:
+ *  - Number of cloud providers
+ *  - Infrastructure complexity
+ *  - Multi-cloud features
+ *  - Enterprise-only components
  */
 
-import pricing from "../../marketing/pricing.json";
+import { getPlan } from "@/ai-builder/plan-logic";
 
 export class UpgradeEngine {
   /**
-   * Evaluate AI output against plan limits
+   * Evaluate whether the AI result exceeds the allowed features
+   * for the user's tier.
    */
   static async evaluate(aiOutput: any, planId: string) {
-    const plan = pricing.plans.find((p) => p.id === planId);
+    const plan = getPlan(planId);
 
     if (!plan) {
-      return { needsUpgrade: true, recommendedPlan: "developer" };
+      return {
+        needsUpgrade: false,
+        message: "Invalid plan tier",
+      };
     }
 
-    // ----------------------------------------------------------
-    // 1. Extract provider list from output
-    // ----------------------------------------------------------
-    const providersUsed =
-      aiOutput?.providers ??
-      aiOutput?.cloud?.providers ??
-      [];
-
-    const providerCount = Array.isArray(providersUsed)
-      ? providersUsed.length
-      : 0;
-
-    // ----------------------------------------------------------
-    // 2. Provider count enforcement
-    // ----------------------------------------------------------
-    if (plan.providers !== "unlimited") {
-      if (providerCount > plan.providers) {
-        const nextPlan = UpgradeEngine.nextPlan(planId);
-
-        return {
-          needsUpgrade: true,
-          recommendedPlan: nextPlan,
-          message: `Your build uses ${providerCount} providers, but your current plan allows only ${plan.providers}. Upgrade to ${nextPlan} to continue.`,
-        };
-      }
+    // Defensive default
+    if (!aiOutput || typeof aiOutput !== "object") {
+      return {
+        needsUpgrade: false,
+      };
     }
 
-    // ----------------------------------------------------------
-    // 3. Feature enforcement (multi-cloud, SSO, CI/CD, etc.)
-    // ----------------------------------------------------------
-    const requiredFeatures = aiOutput?.features ?? [];
+    const usedProviders = Array.isArray(aiOutput.providers)
+      ? aiOutput.providers.length
+      : 1;
 
-    const deniedFeatures = UpgradeEngine.checkFeatureViolations(
-      plan,
-      requiredFeatures
-    );
-
-    if (deniedFeatures.length > 0) {
+    // -----------------------------------------------------------
+    // Rule 1: Provider Limit Check
+    // -----------------------------------------------------------
+    if (
+      plan.providers !== "unlimited" &&
+      usedProviders > Number(plan.providers)
+    ) {
       const nextPlan = UpgradeEngine.nextPlan(planId);
 
       return {
         needsUpgrade: true,
         recommendedPlan: nextPlan,
-        message: `Your build requires features not supported on the ${plan.name} plan: ${deniedFeatures.join(
-          ", "
-        )}. Please upgrade to ${nextPlan}.`,
+        message: `Your architecture uses ${usedProviders} providers, which exceeds your ${planId} tier limit.`,
       };
     }
 
-    // ----------------------------------------------------------
-    // 4. Output too advanced (Kubernetes, Terraform, Autoscaling)
-    // ----------------------------------------------------------
-    if (!UpgradeEngine.planAllowsKubernetes(planId)) {
-      if (aiOutput?.kubernetes || aiOutput?.terraform) {
-        return {
-          needsUpgrade: true,
-          recommendedPlan: "team",
-          message:
-            "Kubernetes and Terraform modules require the Team or Enterprise plan.",
-        };
-      }
+    // -----------------------------------------------------------
+    // Rule 2: Feature Capability Check
+    // -----------------------------------------------------------
+    const requiresEnterpriseFeatures =
+      aiOutput.features?.includes("multi-cloud-failover") ||
+      aiOutput.features?.includes("global-route-failover") ||
+      aiOutput.features?.includes("ai_autoscale") ||
+      aiOutput.features?.includes("zero_downtime_deployments");
+
+    if (requiresEnterpriseFeatures && planId !== "enterprise") {
+      return {
+        needsUpgrade: true,
+        recommendedPlan: "enterprise",
+        message:
+          "This architecture includes enterprise-only resiliency and scaling features. Upgrade required.",
+      };
     }
 
-    // ----------------------------------------------------------
-    // 5. Enterprise-only features
-    // ----------------------------------------------------------
-    if (UpgradeEngine.requiresEnterprise(aiOutput)) {
-      if (planId !== "enterprise") {
-        return {
-          needsUpgrade: true,
-          recommendedPlan: "enterprise",
-          message:
-            "This infrastructure requires Enterprise-only capabilities (zero-downtime deploys, AI autoscale, enterprise SSO, or multi-cloud failover).",
-        };
-      }
+    // -----------------------------------------------------------
+    // Rule 3: Complexity Check (pipeline + microservice count)
+    // -----------------------------------------------------------
+    const serviceCount = aiOutput.services?.length ?? 1;
+
+    if (serviceCount > 10 && planId === "developer") {
+      return {
+        needsUpgrade: true,
+        recommendedPlan: "startup",
+        message:
+          "Developer tier limited to small builds. Generated architecture exceeds service complexity.",
+      };
     }
 
-    // ----------------------------------------------------------
-    // Otherwise the output is valid
-    // ----------------------------------------------------------
+    if (serviceCount > 25 && planId === "startup") {
+      return {
+        needsUpgrade: true,
+        recommendedPlan: "team",
+        message:
+          "Startup tier exceeded. Upgrade to Team for medium-sized architectures.",
+      };
+    }
+
+    // -----------------------------------------------------------
+    // All tests passed = no upgrade required
+    // -----------------------------------------------------------
     return {
       needsUpgrade: false,
-      recommendedPlan: null,
       message: null,
     };
   }
 
   /**
-   * Plan progression path
+   * Determine next upgrade path in order:
+   * developer → startup → team → enterprise
    */
-  static nextPlan(planId: string) {
-    if (planId === "developer") return "startup";
-    if (planId === "startup") return "team";
-    return "enterprise";
-  }
-
-  /**
-   * Check feature violations based on marketing.json
-   */
-  static checkFeatureViolations(plan: any, features: string[]) {
-    if (!features || features.length === 0) return [];
-
-    const denied: string[] = [];
-
-    features.forEach((f) => {
-      const allowed = plan.automation?.vendor_integrations ?? [];
-
-      if (!allowed.includes(f)) {
-        denied.push(f);
-      }
-    });
-
-    return denied;
-  }
-
-  /**
-   * Kubernetes & Terraform require Team+
-   */
-  static planAllowsKubernetes(planId: string) {
-    return planId === "team" || planId === "enterprise";
-  }
-
-  /**
-   * Identify Enterprise-only infra
-   */
-  static requiresEnterprise(aiOutput: any) {
-    const entFlags = [
-      "zero_downtime",
-      "multi_cloud_failover",
-      "ai_autoscale",
-      "enterprise_sso",
-      "gov_compliance",
-    ];
-
-    return entFlags.some((flag) => JSON.stringify(aiOutput).includes(flag));
+  static nextPlan(current: string) {
+    switch (current) {
+      case "developer":
+        return "startup";
+      case "startup":
+        return "team";
+      case "team":
+        return "enterprise";
+      default:
+        return "enterprise";
+    }
   }
 }
