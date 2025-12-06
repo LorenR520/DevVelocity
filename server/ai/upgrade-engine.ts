@@ -3,116 +3,192 @@
 /**
  * DevVelocity AI — Upgrade Engine
  * --------------------------------------------------------
- * Used when:
- *  ✓ A user requests "Upgrade Existing File"
- *  ✓ AI Builder Router detects outdated fields
- *  ✓ A plan exceeds its permitted capabilities
+ * Detects whether an AI-generated architecture exceeds
+ * the limits of the user's current plan.
  *
- * Responsibilities:
- *  ✓ Compare architecture JSON to latest schema
- *  ✓ Suggest upgrades
- *  ✓ Block upgrades requiring a higher tier
- *  ✓ Produce a new JSON file aligned to 2025 DX standards
+ * Examples:
+ *  - More cloud providers than allowed
+ *  - Advanced Kubernetes features on Developer tier
+ *  - Multi-cloud failover on Startup/Team
+ *  - Enterprise-only SSO / Observability
  */
 
-import OpenAI from "openai";
-import { buildUpgradePrompt } from "@/server/ai/prompt";
-import { getPlan } from "@/ai-builder/plan-logic";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+import pricingData from "@/marketing/pricing.json";
 
 export class UpgradeEngine {
   /**
-   * Evaluate whether the output exceeds plan limits
-   * Called inside builder-router.ts
+   * Evaluate whether the AI output should trigger an upgrade
    */
   static async evaluate(aiOutput: any, planId: string) {
-    const plan = getPlan(planId);
-    if (!plan) return { needsUpgrade: false };
-
-    const features = aiOutput?.features ?? {};
-
-    // Example rules — these prevent lower-tier users
-    // from generating enterprise-level infra
-    const violations = [];
-
-    // If user is on Startup but AI generated multi-cloud
-    if (features.multiCloud && planId === "developer") {
-      violations.push("Multi-cloud orchestration requires Startup tier.");
+    if (!aiOutput || !aiOutput.architecture) {
+      return { needsUpgrade: false };
     }
 
-    if (features.multiCloud && planId === "startup") {
-      violations.push("Multi-cloud orchestration requires Team tier.");
-    }
+    const plans = pricingData.plans;
+    const plan = plans.find((p) => p.id === planId);
 
-    if (features.multiCloudFailover && planId !== "enterprise") {
-      violations.push("AI Auto-Failover requires Enterprise tier.");
-    }
-
-    if (violations.length > 0) {
-      const recommendedPlan =
-        planId === "developer"
-          ? "startup"
-          : planId === "startup"
-          ? "team"
-          : "enterprise";
-
+    if (!plan) {
       return {
         needsUpgrade: true,
-        message: violations.join(" "),
-        recommendedPlan,
+        message: "Invalid plan — please upgrade.",
+        recommendedPlan: "startup",
       };
     }
 
+    const arch = aiOutput.architecture;
+
+    // --------------------------------------------------------
+    // RULE 1 — Provider Count Limit
+    // --------------------------------------------------------
+    const providerCount = Array.isArray(arch.providers)
+      ? arch.providers.length
+      : 0;
+
+    if (
+      typeof plan.providers === "number" &&
+      providerCount > plan.providers
+    ) {
+      const nextPlan = UpgradeEngine.nextPlan(planId);
+
+      return {
+        needsUpgrade: true,
+        message: `Your plan allows ${plan.providers} provider(s), but this architecture requires ${providerCount}.`,
+        recommendedPlan: nextPlan,
+      };
+    }
+
+    // --------------------------------------------------------
+    // RULE 2 — Builder/Feature Capabilities
+    // --------------------------------------------------------
+
+    // Kubernetes detection
+    if (
+      arch.kubernetes?.enabled &&
+      ["developer", "startup"].includes(planId)
+    ) {
+      return {
+        needsUpgrade: true,
+        message:
+          "Kubernetes deployments require the Team or Enterprise plan.",
+        recommendedPlan: "team",
+      };
+    }
+
+    // Multi-cloud failover
+    if (
+      arch.multiCloud?.enabled &&
+      !plan.automation.multi_cloud_failover
+    ) {
+      return {
+        needsUpgrade: true,
+        message:
+          "Multi-cloud failover is only available on the Enterprise plan.",
+        recommendedPlan: "enterprise",
+      };
+    }
+
+    // SSO enforcement
+    const requiredSSO = arch?.security?.sso;
+    if (requiredSSO === "advanced" && planId === "developer") {
+      return {
+        needsUpgrade: true,
+        message: "Advanced SSO requires at least the Team plan.",
+        recommendedPlan: "team",
+      };
+    }
+
+    if (requiredSSO === "enterprise" && planId !== "enterprise") {
+      return {
+        needsUpgrade: true,
+        message: "Enterprise-grade SSO requires Enterprise plan.",
+        recommendedPlan: "enterprise",
+      };
+    }
+
+    // Autoscaling
+    if (
+      arch.scaling?.type === "autoscale" &&
+      plan.automation.scaling !== "autoscale"
+    ) {
+      return {
+        needsUpgrade: true,
+        message: "Autoscaling requires the Team plan.",
+        recommendedPlan: "team",
+      };
+    }
+
+    // AI autoscale
+    if (
+      arch.scaling?.type === "ai_autoscale" &&
+      planId !== "enterprise"
+    ) {
+      return {
+        needsUpgrade: true,
+        message:
+          "AI-powered autoscaling is only available on Enterprise.",
+        recommendedPlan: "enterprise",
+      };
+    }
+
+    // Compliance detection
+    const hasComplianceNeeds = arch?.compliance?.required ?? false;
+
+    if (
+      hasComplianceNeeds &&
+      !["team", "enterprise"].includes(planId)
+    ) {
+      return {
+        needsUpgrade: true,
+        message:
+          "Compliance frameworks require the Team or Enterprise plan.",
+        recommendedPlan: "team",
+      };
+    }
+
+    // Monitoring tier detection
+    const monitoring = arch?.monitoring?.level;
+
+    if (
+      monitoring === "enhanced" &&
+      !["team", "enterprise"].includes(planId)
+    ) {
+      return {
+        needsUpgrade: true,
+        message: "Enhanced monitoring requires the Team plan.",
+        recommendedPlan: "team",
+      };
+    }
+
+    if (
+      monitoring === "full" &&
+      planId !== "enterprise"
+    ) {
+      return {
+        needsUpgrade: true,
+        message: "Full observability requires the Enterprise plan.",
+        recommendedPlan: "enterprise",
+      };
+    }
+
+    // --------------------------------------------------------
+    // No upgrade required
+    // --------------------------------------------------------
     return { needsUpgrade: false };
   }
 
   /**
-   * Upgrade an existing DevVelocity architecture file
+   * Get the recommended next higher plan
    */
-  static async runUpgrade(existingFile: any, planId: string) {
-    try {
-      const prompt = buildUpgradePrompt(existingFile, planId);
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.1-pro",
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content: prompt,
-          },
-        ],
-        max_tokens: 6000,
-      });
-
-      const raw = response.choices?.[0]?.message?.content;
-
-      if (!raw) {
-        return { error: "Upgrade engine returned no output." };
-      }
-
-      // Attempt to parse upgraded JSON
-      try {
-        const upgraded = JSON.parse(raw);
-
-        return {
-          upgraded,
-          message: "Upgrade completed successfully.",
-        };
-      } catch (err) {
-        return {
-          error: "Failed to parse JSON upgrade output.",
-          raw,
-        };
-      }
-    } catch (err: any) {
-      console.error("Upgrade Engine Error:", err);
-      return {
-        error: err.message ?? "Unknown upgrade engine failure.",
-      };
+  static nextPlan(planId: string) {
+    switch (planId) {
+      case "developer":
+        return "startup";
+      case "startup":
+        return "team";
+      case "team":
+        return "enterprise";
+      default:
+        return "enterprise";
     }
   }
 }
