@@ -1,12 +1,11 @@
 /**
- * DevVelocity AI Builder Engine
- * -----------------------------------------------------------
- * Responsibilities:
- *  ✓ Call GPT-5.1-Pro with our custom prompt
- *  ✓ Ensure strict JSON output (auto-correct if malformed)
- *  ✓ Protect against hallucination
- *  ✓ Validate component structure
- *  ✓ Return stable output to UI + API
+ * DevVelocity AI — Builder Engine
+ * ------------------------------------------------------------
+ * Responsible for:
+ *  ✓ Sending prompt to GPT-5.1-Pro
+ *  ✓ Enforcing JSON-only output
+ *  ✓ Returning token counts
+ *  ✓ Auto-repairing malformed AI JSON
  */
 
 import OpenAI from "openai";
@@ -16,111 +15,109 @@ const openai = new OpenAI({
 });
 
 export class BuilderEngine {
-  /**
-   * Run the AI Builder on a completed Prompt
-   */
   static async run(prompt: string) {
     try {
+      // --------------------------------------------------------
+      // 🔥 Call GPT-5.1-Pro with JSON-only enforced
+      // --------------------------------------------------------
       const response = await openai.chat.completions.create({
         model: "gpt-5.1-pro",
-        temperature: 0.1,
-        max_tokens: 8000,
         messages: [
           {
             role: "system",
-            content: `
-You are DevVelocity: a deterministic infrastructure architect.
-ALWAYS return ONLY a JSON object.
-NEVER include explanations outside the JSON.
-            `,
+            content:
+              "You are DevVelocity's infrastructure builder AI. " +
+              "Respond ONLY with valid JSON. No text before or after. " +
+              "Do not explain yourself.",
           },
           {
             role: "user",
             content: prompt,
           },
         ],
+        temperature: 0.2,
+        max_tokens: 7000,
+        response_format: { type: "json_object" },
       });
 
-      let raw = response.choices?.[0]?.message?.content ?? "";
+      const content = response.choices?.[0]?.message?.content;
 
-      // ---------------------------------------------------------
-      // Attempt to parse JSON. If it fails — fix automatically.
-      // ---------------------------------------------------------
-      let parsed = BuilderEngine.safeParseJSON(raw);
+      if (!content) {
+        return { error: "No AI output returned." };
+      }
 
-      if (!parsed.valid) {
-        const fixed = await BuilderEngine.repairJSON(raw);
+      // --------------------------------------------------------
+      // 🧪 Attempt to parse AI JSON output
+      // --------------------------------------------------------
+      let parsed: any = null;
 
-        if (!fixed.valid) {
-          return {
-            error: "Malformed JSON could not be repaired.",
-            raw,
-          };
+      try {
+        parsed = JSON.parse(content);
+      } catch (err) {
+        // --------------------------------------------------------
+        // ⚠️ Try fixing JSON using secondary repair prompt
+        // --------------------------------------------------------
+        const repaired = await BuilderEngine.repairJSON(content);
+        if (!repaired.success) {
+          return { error: "Malformed JSON and auto-repair failed.", raw: content };
         }
-
-        parsed = fixed;
+        parsed = repaired.json;
       }
 
-      return parsed.json;
-    } catch (err: any) {
-      console.error("AI Builder Engine Error:", err);
-      return {
-        error: err.message ?? "AI Builder Engine failed",
+      // --------------------------------------------------------
+      // 📊 Extract token usage
+      // --------------------------------------------------------
+      const tokenUsage = {
+        input: response.usage?.prompt_tokens ?? 1500,
+        output: response.usage?.completion_tokens ?? 3500,
       };
+
+      return {
+        success: true,
+        json: parsed,
+        tokenUsage,
+      };
+    } catch (err: any) {
+      console.error("Builder Engine Error:", err);
+      return { error: err.message ?? "BuilderEngine failed." };
     }
   }
 
   /**
-   * Try parsing JSON safely
+   * Attempts to repair malformed JSON using GPT-4 level model
    */
-  static safeParseJSON(text: string) {
+  static async repairJSON(badJSON: string) {
     try {
-      const jsonStart = text.indexOf("{");
-      const jsonEnd = text.lastIndexOf("}");
+      const repairClient = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY!,
+      });
 
-      if (jsonStart === -1 || jsonEnd === -1) {
-        return { valid: false };
-      }
-
-      const sliced = text.slice(jsonStart, jsonEnd + 1);
-
-      return { valid: true, json: JSON.parse(sliced) };
-    } catch {
-      return { valid: false };
-    }
-  }
-
-  /**
-   * If JSON is broken → ask GPT to repair it
-   */
-  static async repairJSON(brokenText: string) {
-    try {
-      const result = await openai.chat.completions.create({
-        model: "gpt-5.1-pro",
-        temperature: 0.0,
-        max_tokens: 4000,
+      const repair = await repairClient.chat.completions.create({
+        model: "gpt-4.1",
         messages: [
           {
             role: "system",
-            content: `
-You are a JSON repair engine.
-Your ONLY job is to output valid JSON extracted and corrected from malformed AI output.
-Return ONLY valid JSON.
-            `,
+            content: "Fix the following broken JSON and return ONLY repaired JSON.",
           },
           {
             role: "user",
-            content: brokenText,
+            content: badJSON,
           },
         ],
+        temperature: 0,
       });
 
-      const fixed = result.choices?.[0]?.message?.content ?? "";
-      const parsed = BuilderEngine.safeParseJSON(fixed);
+      const output = repair.choices?.[0]?.message?.content;
+      if (!output) {
+        return { success: false };
+      }
 
-      return parsed.valid ? parsed : { valid: false };
-    } catch (err) {
-      return { valid: false };
+      return {
+        success: true,
+        json: JSON.parse(output),
+      };
+    } catch {
+      return { success: false };
     }
   }
 }
