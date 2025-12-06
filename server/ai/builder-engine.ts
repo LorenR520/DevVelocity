@@ -1,89 +1,175 @@
-// server/ai/builder-engine.ts
+// ------------------------------------------------------
+//  DevVelocity — AI Builder Engine (Core Orchestration)
+// ------------------------------------------------------
+//  This module constructs the full prompt payload for GPT
+//  after merging:
+//      ✓ deterministic recommendations
+//      ✓ provider packs
+//      ✓ architecture presets
+//      ✓ compliance + security shaping
+//      ✓ tier limits
+//
+//  The engine does *not* call OpenAI. All AI execution
+//  happens inside ai-client.ts.
+// ------------------------------------------------------
 
-/**
- * DevVelocity AI — Builder Engine
- * ---------------------------------------------------------
- * Responsibilities:
- *  ✓ Accepts a fully built prompt
- *  ✓ Calls GPT-5.1-Pro safely
- *  ✓ Forces structured JSON output
- *  ✓ Attempts recovery if model returns invalid JSON
- *  ✓ Returns final normalized builder object
- */
+import { RecommendationInputs } from "./recommendations";
+import { generateRecommendations } from "./recommendations";
+import { ProviderPack, providerLibrary } from "@/server/providers/provider-library";
+import tierConfig from "@/marketing/tiers.json";
 
-import OpenAI from "openai";
-
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("⚠️ Missing OPENAI_API_KEY — AI Builder will not function.");
+export interface BuilderInputs extends RecommendationInputs {
+  tier: "developer" | "startup" | "team" | "enterprise";
+  projectName: string;
+  description: string;
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-/**
- * Normalize whitespace and invisible characters that cause JSON parsing issues
- */
-function cleanJSON(str: string) {
-  return str
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .replace(/\u0000/g, "")
-    .trim();
+export interface BuilderEngineOutput {
+  finalPrompt: string;
+  provider: string;
+  architecture: string;
+  db: string;
+  compliance: Record<string, boolean>;
+  securityDirectives: string[];
+  limits: {
+    fileLimit: number;
+    maxServices: number;
+    multiRegion: boolean;
+  };
 }
 
-export class BuilderEngine {
-  /**
-   * Execute the AI build generation
-   */
-  static async run(
-    openaiClient: OpenAI,
-    prompt: string
-  ): Promise<any> {
-    try {
-      const response = await openaiClient.chat.completions.create({
-        model: "gpt-5.1-pro",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are DevVelocity AI — output MUST be valid JSON. No commentary.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 8000,
-        response_format: { type: "json_object" }, // Force JSON
-      });
+// ------------------------------------------------------
+// MAIN BUILDER ENGINE
+// ------------------------------------------------------
+export function buildAIRequest(inputs: BuilderInputs): BuilderEngineOutput {
+  const rec = generateRecommendations(inputs);
 
-      const content = response.choices?.[0]?.message?.content;
+  const provider = resolveProvider(inputs.cloudPreference, rec.provider);
+  const providerPack = providerLibrary[provider] as ProviderPack;
 
-      if (!content) {
-        return { error: "AI returned no content." };
-      }
+  const architecture = resolveArchitecture(inputs.workloadType, rec.architecture);
+  const db = resolveDB(inputs.dbPreference, rec.db);
+  const compliance = normalizeCompliance(inputs.compliance);
+  const limits = computeTierLimits(inputs.tier);
+  const securityDirectives = buildSecurityDirectives(compliance, provider);
 
-      const cleaned = cleanJSON(content);
+  const finalPrompt = buildPrompt({
+    inputs,
+    rec,
+    provider,
+    providerPack,
+    architecture,
+    db,
+    compliance,
+    securityDirectives,
+    limits,
+  });
 
-      try {
-        // Attempt JSON parse
-        const parsed = JSON.parse(cleaned);
-        return { success: true, ...parsed };
-      } catch (err) {
-        console.error("JSON Parse Error:", err);
-        return {
-          error: "AI returned invalid JSON.",
-          raw: cleaned,
-        };
-      }
-    } catch (err: any) {
-      console.error("AI Builder Engine Error:", err);
+  return {
+    finalPrompt,
+    provider,
+    architecture,
+    db,
+    compliance,
+    securityDirectives,
+    limits,
+  };
+}
 
-      return {
-        error: err?.message ?? "Unknown AI Builder Error",
-      };
-    }
-  }
+// ------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------
+function resolveProvider(input: string, rec: string): string {
+  if (input && providerLibrary[input]) return input;
+  if (providerLibrary[rec]) return rec;
+  return "aws";
+}
+
+function resolveArchitecture(input: string, rec: string): string {
+  return input || rec || "web-app";
+}
+
+function resolveDB(input: string, rec: string): string {
+  return input || rec || "postgres";
+}
+
+function normalizeCompliance(c: any): Record<string, boolean> {
+  return {
+    hipaa: !!c?.hipaa,
+    soc2: !!c?.soc2,
+    pci: !!c?.pci,
+    fedramp: !!c?.fedramp,
+    gdpr: !!c?.gdpr,
+  };
+}
+
+function computeTierLimits(tier: BuilderInputs["tier"]) {
+  const config = tierConfig[tier] || tierConfig["developer"];
+  return {
+    fileLimit: config.fileLimit,
+    maxServices: config.maxServices,
+    multiRegion: config.multiRegion,
+  };
+}
+
+function buildSecurityDirectives(compliance: any, provider: string) {
+  const out: string[] = [];
+  if (compliance.hipaa) out.push("Apply HIPAA encryption + access logging.");
+  if (compliance.soc2) out.push("Ensure SOC2 audit trails.");
+  if (compliance.pci) out.push("Use PCI tokenization.");
+  if (compliance.gdpr) out.push("GDPR data locality + right-to-forget flows.");
+  if (compliance.fedramp) out.push("FedRAMP-moderate controls only.");
+  out.push(`Follow ${provider.toUpperCase()} Well-Architected security practices.`);
+  return out;
+}
+
+// ------------------------------------------------------
+// PROMPT BUILDER
+// ------------------------------------------------------
+function buildPrompt(payload: any): string {
+  const {
+    inputs,
+    rec,
+    provider,
+    providerPack,
+    architecture,
+    db,
+    compliance,
+    securityDirectives,
+    limits,
+  } = payload;
+
+  return `
+You are DevVelocity's AI Builder Engine.
+
+PROJECT: ${inputs.projectName}
+DESCRIPTION: ${inputs.description}
+
+PROVIDER: ${provider}
+ARCHITECTURE: ${architecture}
+DB: ${db}
+
+COMPLIANCE:
+${Object.entries(compliance)
+  .map(([k, v]) => `- ${k}: ${v}`)
+  .join("\n")}
+
+SECURITY:
+${securityDirectives.map((d: string) => `- ${d}`).join("\n")}
+
+LIMITS:
+- Max files: ${limits.fileLimit}
+- Max services: ${limits.maxServices}
+- Multi-region allowed: ${limits.multiRegion}
+
+PROVIDER PACK:
+${providerPack.context}
+
+RECOMMENDATIONS:
+${JSON.stringify(rec, null, 2)}
+
+TASK:
+Generate a complete infrastructure + code blueprint optimized for these constraints.
+Return ONLY valid JSON following the DevVelocity schema.
+`;
 }
