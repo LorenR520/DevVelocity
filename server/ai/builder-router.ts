@@ -1,36 +1,32 @@
-// server/ai/builder-router.ts
 /**
- * DevVelocity AI — Builder Router (Production Ready)
- * ----------------------------------------------------
- * Responsibilities:
- *  ✓ Apply plan rules
- *  ✓ Enforce paid tier limits (Developer is PAID)
- *  ✓ Build prompt
- *  ✓ Run Builder Engine (GPT-5.1)
- *  ✓ Evaluate upgrade requirements
- *  ✓ Log usage for billing
+ * DevVelocity AI — Builder Router
+ * ------------------------------------------------------------
+ * Central controller for all AI Builder operations.
+ *
+ * Handles:
+ *  ✓ Rate limits per tier
+ *  ✓ Plan gating (developer/startup/team/enterprise)
+ *  ✓ Prompt generation
+ *  ✓ AI Builder Execution (GPT-5.1-Pro)
+ *  ✓ Upgrade Recommendation Engine
+ *  ✓ Billing / Usage Logging
+ *  ✓ Error shielding
  */
 
 import { applyRateLimit } from "./rate-limit";
 import { buildAIPrompt } from "./prompt";
 import { BuilderEngine } from "./builder-engine";
 import { UpgradeEngine } from "./upgrade-engine";
-import { getPlan } from "./plan-logic";   // FIXED PATH
-import OpenAI from "openai";
+import { AICreditTracking } from "./credit-tracking";
+import { getPlan } from "@/ai-builder/plan-logic";
 import { createClient } from "@supabase/supabase-js";
-
-// Global OpenAI client — GPT-5.1
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
 
 export class AIBuilderRouter {
   /**
-   * Main orchestrator for the AI Builder flow
+   * Main entry point for AI Builder Requests
    */
   static async run(orgId: string, answers: any) {
     try {
-      // Determine plan ID from request or force developer
       const planId = answers.plan ?? "developer";
       const plan = getPlan(planId);
 
@@ -38,83 +34,84 @@ export class AIBuilderRouter {
         return { error: "Invalid plan tier." };
       }
 
-      // ------------------------------------------------------
-      // 🔒 RATE LIMIT ENFORCEMENT (all tiers are paid)
-      // ------------------------------------------------------
-      const rateCheck = await applyRateLimit(orgId, planId);
+      // -------------------------------------------------------
+      // 🔒 Rate Limiting
+      // -------------------------------------------------------
+      const limitCheck = await applyRateLimit(orgId, planId);
 
-      if (!rateCheck.allowed) {
+      if (!limitCheck.allowed) {
         return {
-          error: rateCheck.reason,
-          upgrade: rateCheck.suggestedUpgrade ?? null,
+          error: limitCheck.reason,
+          upgrade: limitCheck.upgradeMessage ?? `Upgrade to increase limits.`,
         };
       }
 
-      // ------------------------------------------------------
-      // 🧠 BUILD AI PROMPT BASED ON USER ANSWERS
-      // ------------------------------------------------------
+      // -------------------------------------------------------
+      // 🧠 Build AI Prompt
+      // -------------------------------------------------------
       const prompt = buildAIPrompt(answers);
 
-      // ------------------------------------------------------
-      // 🤖 RUN BUILDER ENGINE (GPT-5.1)
-      // ------------------------------------------------------
-      const aiResult = await BuilderEngine.run(openai, prompt);
+      // -------------------------------------------------------
+      // 🤖 Run Builder via GPT-5.1-Pro
+      // -------------------------------------------------------
+      const aiOutput = await BuilderEngine.run(prompt);
 
-      if (!aiResult) {
-        return { error: "AI Builder returned no output." };
+      if (aiOutput?.error) {
+        return { error: aiOutput.error };
       }
 
-      // ------------------------------------------------------
-      // 🧪 EVALUATE WHETHER PLAN LIMITATIONS ARE EXCEEDED
-      // ------------------------------------------------------
-      const upgradeSuggestions = await UpgradeEngine.evaluate(
-        aiResult,
-        planId
-      );
+      // -------------------------------------------------------
+      // 🧪 Evaluate Output for Tier Upgrade Suggestions
+      // -------------------------------------------------------
+      const upgradeCheck = await UpgradeEngine.evaluate(aiOutput, planId);
 
-      if (upgradeSuggestions?.needsUpgrade) {
+      if (upgradeCheck.needsUpgrade) {
         return {
-          output: aiResult,
-          upgrade: upgradeSuggestions.message,
-          suggestedPlan: upgradeSuggestions.recommendedPlan,
+          output: aiOutput,
+          upgrade: upgradeCheck.message,
+          suggestedPlan: upgradeCheck.recommendedPlan,
         };
       }
 
-      // ------------------------------------------------------
-      // 📊 BILLING — LOG USAGE
-      // ------------------------------------------------------
+      // -------------------------------------------------------
+      // 🔢 Token Cost / Billing / Usage Tracking
+      // -------------------------------------------------------
+      await AICreditTracking.record({
+        orgId,
+        planId,
+        inputTokens: aiOutput?.tokenUsage?.input ?? 1500,
+        outputTokens: aiOutput?.tokenUsage?.output ?? 3500,
+      });
+
+      // -------------------------------------------------------
+      // 📊 Log usage event
+      // -------------------------------------------------------
       await AIBuilderRouter.logUsage(orgId, planId);
 
       return {
-        output: aiResult,
+        output: aiOutput,
         upgrade: null,
       };
     } catch (err: any) {
       console.error("AI Builder Router Error:", err);
-      return {
-        error: "AI Builder encountered an internal error.",
-      };
+      return { error: "AI Builder Router failed unexpectedly." };
     }
   }
 
   /**
-   * Log AI usage in billing_events table
+   * Save a usage event to billing_events
    */
   static async logUsage(orgId: string, planId: string) {
-    try {
-      const supabase = createClient(
-        process.env.SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
-      await supabase.from("billing_events").insert({
-        org_id: orgId,
-        type: "ai_usage",
-        amount: 1, // 1 AI build event
-        details: { plan: planId },
-      });
-    } catch (err) {
-      console.error("Billing Usage Log Error:", err);
-    }
+    await supabase.from("billing_events").insert({
+      org_id: orgId,
+      type: "ai_builder_request",
+      amount: 1,
+      details: { plan: planId },
+    });
   }
 }
